@@ -1,6 +1,6 @@
-import sys
 from pathlib import Path
 
+import sys
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -8,14 +8,15 @@ SRC = PROJECT_ROOT / "src"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src import mcp_server
-
 pytestmark = pytest.mark.asyncio
 
 
 async def test_mcp_end_to_end() -> None:
     """Exercise the full MCP tool surface against the real debugpy adapter."""
     sample_app = SRC / "sample_app" / "app.py"
+
+    # Import the MCP server module after ensuring the project root is on sys.path
+    mcp_server = __import__("src.mcp_server", fromlist=["mcp_server"])  # type: ignore
 
     demo = mcp_server.ensure_demo_program()
     assert Path(demo["path"]).exists()
