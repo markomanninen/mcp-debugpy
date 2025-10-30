@@ -1,4 +1,3 @@
-
 """
 MCP Server for Agent-Driven Python Debugging and Testing
 
@@ -51,6 +50,7 @@ mcp = FastMCP("agent-debug-tools", instructions=_load_agent_instructions())
 _breakpoint_registry: Dict[str, List[int]] = {}
 _last_stopped_event: Optional[Dict[str, Any]] = None
 
+
 @mcp.tool()
 def ensure_demo_program(directory: Optional[str] = None) -> Dict[str, Any]:
     """Create a reusable demo script with an intentional bug for debugging walkthroughs."""
@@ -62,8 +62,9 @@ def ensure_demo_program(directory: Optional[str] = None) -> Dict[str, Any]:
         demo_dir = PROJECT_ROOT / "examples" / "demo_program"
     demo_dir.mkdir(parents=True, exist_ok=True)
     demo_path = (demo_dir / "demo_program.py").resolve()
-    demo_source = dedent(
-        """
+    demo_source = (
+        dedent(
+            """
         def calculate_average(numbers):
             total = sum(numbers)
             count = len(numbers)
@@ -90,7 +91,9 @@ def ensure_demo_program(directory: Optional[str] = None) -> Dict[str, Any]:
         if __name__ == "__main__":
             main()
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
     demo_path.write_text(demo_source, encoding="utf-8")
     launch = {
         "program": str(demo_path),
@@ -141,29 +144,30 @@ def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
         "truncated": truncated,
     }
 
+
 def _get_python_executable() -> Path:
     """Get the correct Python executable, preferring virtual environment if available."""
     # First check if we're already in a virtual environment via VIRTUAL_ENV
-    if 'VIRTUAL_ENV' in os.environ:
-        venv_python = Path(os.environ['VIRTUAL_ENV']) / "bin" / "python"
+    if "VIRTUAL_ENV" in os.environ:
+        venv_python = Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python"
         if venv_python.exists():
             log_debug(f"_get_python_executable: using VIRTUAL_ENV {venv_python}")
             return venv_python
-    
+
     # Check if we're in a virtual environment relative to current working directory
     cwd = Path.cwd()
     venv_path = cwd / ".venv" / "bin" / "python"
     if venv_path.exists():
         log_debug(f"_get_python_executable: using cwd .venv {venv_path}")
         return venv_path
-    
+
     # Check for other common venv locations
     for venv_name in [".venv", "venv", "env"]:
         venv_python = cwd / venv_name / "bin" / "python"
         if venv_python.exists():
             log_debug(f"_get_python_executable: using cwd venv {venv_python}")
             return venv_python
-    
+
     # Check parent directories for virtual environments
     for parent in cwd.parents:
         for venv_name in [".venv", "venv", "env"]:
@@ -176,6 +180,7 @@ def _get_python_executable() -> Path:
     fallback = Path(sys.executable)
     log_debug(f"_get_python_executable: falling back to sys.executable {fallback}")
     return fallback
+
 
 @mcp.tool()
 def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -194,22 +199,28 @@ def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
     if not python_exec.exists():
         return {"error": "Python executable not found", "executable": str(python_exec)}
 
-    cmd = [str(python_exec), "-m", "pytest", "--json-report", f"--json-report-file={report}"]
+    cmd = [
+        str(python_exec),
+        "-m",
+        "pytest",
+        "--json-report",
+        f"--json-report-file={report}",
+    ]
     if pytest_args:
         cmd += pytest_args
     # keep output quiet but still run failures
     cmd += ["-q", "--maxfail=1"]
-    
+
     # Add debugging information
     # Change to the directory containing the MCP server
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
-    
+
     # Change to project root directory
     original_cwd = os.getcwd()
     os.chdir(project_root)
-    
-    debug_info = {
+
+    debug_info: Dict[str, Any] = {
         "python_executable": str(python_exec),
         "current_working_directory": os.getcwd(),
         "original_working_directory": original_cwd,
@@ -217,7 +228,7 @@ def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
         "virtual_env": os.environ.get("VIRTUAL_ENV"),
     }
     log_debug(f"run_tests_json: executing command={' '.join(cmd)} info={debug_info}")
-    
+
     # Do not raise on fail; we want to return the JSON either way
     # Redirect all subprocess output to avoid interfering with MCP JSON protocol
     try:
@@ -237,7 +248,7 @@ def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
             "error": "pytest executable not found",
             "note": "Ensure pytest is installed in the same environment as the MCP server.",
             "debug": debug_info,
-            "exception": str(e)
+            "exception": str(e),
         }
     if report.exists():
         data = json.loads(report.read_text())
@@ -255,14 +266,17 @@ def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
         "debug": debug_info,
     }
 
+
 @mcp.tool()
 def run_tests_focus(keyword: str) -> Dict[str, Any]:
     """Run a focused subset: pytest -k <keyword> with JSON report."""
     return run_tests_json(["-k", keyword])
 
+
 # --- DAP Tools ---
 # We keep a single stdio DAP connection per process for simplicity
 _dap_client: Optional[StdioDAPClient] = None
+
 
 async def _ensure_stdio_client(restart: bool = False) -> StdioDAPClient:
     """Create (or recreate) the global stdio DAP client."""
@@ -274,6 +288,7 @@ async def _ensure_stdio_client(restart: bool = False) -> StdioDAPClient:
         _dap_client = StdioDAPClient()
         await _dap_client.start()
     return _dap_client
+
 
 async def _require_client() -> StdioDAPClient:
     client = await _ensure_stdio_client(restart=False)
@@ -291,9 +306,13 @@ def _record_breakpoints(source: str, lines: List[int]) -> None:
         _breakpoint_registry.pop(normalized, None)
 
 
-def _select_thread_id(threads_payload: Dict[str, Any], explicit_id: Optional[int]) -> Optional[int]:
+def _select_thread_id(
+    threads_payload: Dict[str, Any], explicit_id: Optional[int]
+) -> Optional[int]:
     """Select a thread, preferring explicit id, then last stopped thread, finally the first entry."""
-    threads = threads_payload.get("body", {}).get("threads", []) if threads_payload else []
+    threads = (
+        threads_payload.get("body", {}).get("threads", []) if threads_payload else []
+    )
     if not threads:
         return None
     if explicit_id is not None:
@@ -322,6 +341,7 @@ async def _dap_step(command: str, thread_id: Optional[int]) -> Dict[str, Any]:
         "selectedThreadId": tid,
         "command": command,
     }
+
 
 async def _resilient_set_breakpoints(
     client: StdioDAPClient,
@@ -357,6 +377,7 @@ async def _resilient_set_breakpoints(
         _record_breakpoints(source_path, lines)
     return retry, primary
 
+
 async def _resilient_set_exception_breakpoints(
     client: StdioDAPClient,
     filters: Optional[List[str]] = None,
@@ -383,9 +404,12 @@ async def _resilient_set_exception_breakpoints(
     try:
         retry = await client.setExceptionBreakpoints(filters or [])
     except RuntimeError as err:
-        log_debug(f"_resilient_set_exception_breakpoints retry: adapter unavailable: {err}")
+        log_debug(
+            f"_resilient_set_exception_breakpoints retry: adapter unavailable: {err}"
+        )
         return {"success": False, "message": str(err)}, primary
     return retry, primary
+
 
 @mcp.tool()
 async def dap_launch(
@@ -405,7 +429,9 @@ async def dap_launch(
     """
     global _last_stopped_event
 
-    def _resolve_cwd(raw: Optional[str]) -> Tuple[Optional[Path], Optional[Dict[str, Any]]]:
+    def _resolve_cwd(
+        raw: Optional[str],
+    ) -> Tuple[Optional[Path], Optional[Dict[str, Any]]]:
         if not raw:
             return None, None
         candidate = Path(raw).expanduser()
@@ -484,7 +510,9 @@ async def dap_launch(
             _record_breakpoints(str(program_path), breakpoints)
 
     # Step 4: Set exception breakpoints
-    exc_resp, exc_retry = await _resilient_set_exception_breakpoints(client, [], wait_timeout=5.0)
+    exc_resp, exc_retry = await _resilient_set_exception_breakpoints(
+        client, [], wait_timeout=5.0
+    )
     result["setExceptionBreakpoints"] = exc_resp
     if exc_retry:
         result["setExceptionBreakpointsInitial"] = exc_retry
@@ -546,6 +574,7 @@ async def dap_launch(
 
     return result
 
+
 @mcp.tool()
 async def dap_set_breakpoints(source_path: str, lines: List[int]) -> Dict[str, Any]:
     """Set breakpoints by absolute source path and line numbers.
@@ -556,7 +585,9 @@ async def dap_set_breakpoints(source_path: str, lines: List[int]) -> Dict[str, A
     """
     client = await _require_client()
     source = str(Path(source_path).resolve())
-    resp, initial = await _resilient_set_breakpoints(client, source, lines, wait_timeout=5.0)
+    resp, initial = await _resilient_set_breakpoints(
+        client, source, lines, wait_timeout=5.0
+    )
     result = {"response": resp}
     if initial and initial is not resp:
         result["initial"] = initial
@@ -572,6 +603,7 @@ async def dap_list_breakpoints() -> Dict[str, Any]:
     requested without needing to parse prior `dap_set_breakpoints` responses.
     """
     return {"breakpoints": _breakpoint_registry.copy()}
+
 
 @mcp.tool()
 async def dap_continue(thread_id: Optional[int] = None) -> Dict[str, Any]:
@@ -610,6 +642,7 @@ async def dap_step_out(thread_id: Optional[int] = None) -> Dict[str, Any]:
     """Step out of the current function on the active thread."""
     return await _dap_step("stepOut", thread_id)
 
+
 @mcp.tool()
 async def dap_locals() -> Dict[str, Any]:
     """Return locals from the top (or last stopped) stack frame.
@@ -626,7 +659,11 @@ async def dap_locals() -> Dict[str, Any]:
     frames = st.get("body", {}).get("stackFrames", [])
     if not frames:
         return {"error": "No frames", "threads": th, "stackTrace": st}
-    preferred_frame_id = _last_stopped_event.get("body", {}).get("frameId") if _last_stopped_event else None
+    preferred_frame_id = (
+        _last_stopped_event.get("body", {}).get("frameId")
+        if _last_stopped_event
+        else None
+    )
     frame = next((f for f in frames if f.get("id") == preferred_frame_id), frames[0])
     scopes = await client.scopes(frame["id"])
     locals_ref = None
@@ -651,6 +688,7 @@ async def dap_locals() -> Dict[str, Any]:
         "selectedFrameId": frame.get("id"),
     }
 
+
 @mcp.tool()
 async def dap_wait_for_event(name: str, timeout: float = 5.0) -> Dict[str, Any]:
     """Wait for a specific DAP event (e.g., 'stopped')."""
@@ -673,6 +711,7 @@ async def dap_last_stopped_event() -> Dict[str, Any]:
         "breakpoints": _breakpoint_registry.copy(),
     }
 
+
 @mcp.tool()
 async def dap_shutdown() -> Dict[str, Any]:
     """Terminate the current DAP adapter session."""
@@ -682,6 +721,7 @@ async def dap_shutdown() -> Dict[str, Any]:
         _dap_client = None
         return {"status": "stopped"}
     return {"status": "no-session"}
+
 
 def print_help():
     """Print help information about the MCP server and its tools."""
@@ -780,11 +820,12 @@ For more information, see README.md
 """
     print(help_text)
 
+
 if __name__ == "__main__":
     # Check for help request before creating ArgumentParser
     if "--help" in sys.argv or "-h" in sys.argv:
         print_help()
         sys.exit(0)
-    
+
     # If no --help, start the MCP server normally
     mcp.run()

@@ -11,11 +11,13 @@ from typing import Any, Dict, List, Optional
 
 from debug_utils import log_debug
 
+
 class StdioDAPClient:
     """
     DAP client that communicates with debugpy.adapter via stdin/stdout.
     This is the correct way to use debugpy - talk to the adapter, not directly to the target.
     """
+
     def __init__(self, adapter_cmd=None):
         # Launch the adapter in stdio mode
         # Use the correct Python executable from virtual environment if available
@@ -40,13 +42,13 @@ class StdioDAPClient:
         venv_path = Path.cwd() / ".venv" / "bin" / "python"
         if venv_path.exists():
             return venv_path
-        
+
         # Check for other common venv locations
         for venv_name in [".venv", "venv", "env"]:
             venv_python = Path.cwd() / venv_name / "bin" / "python"
             if venv_python.exists():
                 return venv_python
-        
+
         # Fall back to sys.executable
         return Path(sys.executable)
 
@@ -88,25 +90,31 @@ class StdioDAPClient:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
-            log_debug(f"dap_stdio_client.start: adapter process started with PID {self.proc.pid}")
+            log_debug(
+                f"dap_stdio_client.start: adapter process started with PID {self.proc.pid}"
+            )
         except Exception as e:
             log_debug(f"dap_stdio_client.start: failed to start adapter process: {e}")
             raise
 
         self._endpoints_file = endpoints_file
-        
+
         # Add a small delay to let the adapter start
         await asyncio.sleep(0.1)
-        
+
         # Check if process is still running
         if self.proc.returncode is not None:
             stderr_data = await self.proc.stderr.read() if self.proc.stderr else b""
             stdout_data = await self.proc.stdout.read() if self.proc.stdout else b""
-            log_debug(f"dap_stdio_client.start: adapter exited early with code {self.proc.returncode}")
+            log_debug(
+                f"dap_stdio_client.start: adapter exited early with code {self.proc.returncode}"
+            )
             log_debug(f"dap_stdio_client.start: adapter stderr: {stderr_data.decode()}")
             log_debug(f"dap_stdio_client.start: adapter stdout: {stdout_data.decode()}")
-            raise RuntimeError(f"debugpy.adapter exited early with code {self.proc.returncode}")
-        
+            raise RuntimeError(
+                f"debugpy.adapter exited early with code {self.proc.returncode}"
+            )
+
         await self._connect_to_adapter(endpoints_file)
         if self.proc.stderr:
             self._stderr_task = asyncio.create_task(self._drain_stderr())
@@ -118,7 +126,9 @@ class StdioDAPClient:
         elapsed = 0.0
         while elapsed < timeout:
             if self.proc and self.proc.returncode is not None:
-                raise RuntimeError(f"debugpy.adapter exited with code {self.proc.returncode}")
+                raise RuntimeError(
+                    f"debugpy.adapter exited with code {self.proc.returncode}"
+                )
             if endpoints_file.exists() and endpoints_file.stat().st_size > 0:
                 break
             await asyncio.sleep(interval)
@@ -136,14 +146,20 @@ class StdioDAPClient:
         host = client_info.get("host")
         port = client_info.get("port")
         if host is None or port is None:
-            log_debug(f"dap_stdio_client: client endpoint missing host/port {client_info}")
+            log_debug(
+                f"dap_stdio_client: client endpoint missing host/port {client_info}"
+            )
             raise RuntimeError(f"Adapter endpoint missing host/port: {client_info}")
 
         try:
             reader, writer = await asyncio.open_connection(host, port)
         except OSError as exc:
-            log_debug(f"dap_stdio_client: failed to connect to adapter at {host}:{port} error={exc}")
-            raise RuntimeError(f"Unable to connect to debugpy.adapter at {host}:{port}: {exc}")
+            log_debug(
+                f"dap_stdio_client: failed to connect to adapter at {host}:{port} error={exc}"
+            )
+            raise RuntimeError(
+                f"Unable to connect to debugpy.adapter at {host}:{port}: {exc}"
+            )
 
         log_debug(f"dap_stdio_client: connected to adapter at {host}:{port}")
 
@@ -171,7 +187,10 @@ class StdioDAPClient:
                 log_debug(f"dap_stdio_client.stderr: {text}")
                 if self._stderr_summary is None:
                     lowered = text.lower()
-                    if "permissionerror" in lowered or "operation not permitted" in lowered:
+                    if (
+                        "permissionerror" in lowered
+                        or "operation not permitted" in lowered
+                    ):
                         self._stderr_summary = text
         except asyncio.CancelledError:
             raise
@@ -195,7 +214,9 @@ class StdioDAPClient:
         """Send a DAP message to the adapter."""
         if not self._writer:
             raise RuntimeError("Adapter connection not established")
-        log_debug(f"dap_stdio_client._send: {msg.get('type')} {msg.get('command')} seq={msg.get('seq')}")
+        log_debug(
+            f"dap_stdio_client._send: {msg.get('type')} {msg.get('command')} seq={msg.get('seq')}"
+        )
         data = json.dumps(msg).encode("utf-8")
         header = f"Content-Length: {len(data)}\r\n\r\n".encode("ascii")
         self._writer.write(header + data)
@@ -263,7 +284,9 @@ class StdioDAPClient:
     async def request(self, command: str, arguments: Optional[Dict[str, Any]] = None):
         """Send a DAP request and wait for the response."""
         if self._closed_exception is not None:
-            raise RuntimeError(f"debug adapter connection closed: {self._closed_exception}")
+            raise RuntimeError(
+                f"debug adapter connection closed: {self._closed_exception}"
+            )
         if self.proc and self.proc.returncode is not None:
             raise RuntimeError(f"debug adapter exited with code {self.proc.returncode}")
         if not self._writer:
@@ -271,7 +294,12 @@ class StdioDAPClient:
         rid = next(self._seq)
         fut = asyncio.get_event_loop().create_future()
         self._pending[rid] = fut
-        req = {"seq": rid, "type": "request", "command": command, "arguments": arguments or {}}
+        req = {
+            "seq": rid,
+            "type": "request",
+            "command": command,
+            "arguments": arguments or {},
+        }
         await self._send(req)
         return await fut
 
@@ -301,16 +329,19 @@ class StdioDAPClient:
     # DAP protocol methods
     async def initialize(self):
         """Send initialize request."""
-        return await self.request("initialize", {
-            "clientID": "mvp-stdio",
-            "adapterID": "python",
-            "pathFormat": "path",
-            "linesStartAt1": True,
-            "columnsStartAt1": True,
-            "supportsRunInTerminalRequest": False,
-            "supportsStartDebuggingRequest": False,
-            "supportsConfigurationDoneRequest": True,
-        })
+        return await self.request(
+            "initialize",
+            {
+                "clientID": "mvp-stdio",
+                "adapterID": "python",
+                "pathFormat": "path",
+                "linesStartAt1": True,
+                "columnsStartAt1": True,
+                "supportsRunInTerminalRequest": False,
+                "supportsStartDebuggingRequest": False,
+                "supportsConfigurationDoneRequest": True,
+            },
+        )
 
     async def configurationDone(self):
         """Signal that configuration is complete."""
@@ -318,10 +349,13 @@ class StdioDAPClient:
 
     async def setBreakpoints(self, source_path: str, lines: List[int]):
         """Set breakpoints in a source file."""
-        return await self.request("setBreakpoints", {
-            "source": {"path": source_path},
-            "breakpoints": [{"line": l} for l in lines],
-        })
+        return await self.request(
+            "setBreakpoints",
+            {
+                "source": {"path": source_path},
+                "breakpoints": [{"line": l} for l in lines],
+            },
+        )
 
     async def launch(self, program: str, **kwargs):
         """Launch a program under the debugger."""
@@ -337,12 +371,7 @@ class StdioDAPClient:
 
     async def attach(self, connect_host: str, connect_port: int, **kwargs):
         """Attach to a running debugpy.listen() session."""
-        args = {
-            "connect": {
-                "host": connect_host,
-                "port": connect_port
-            }
-        }
+        args = {"connect": {"host": connect_host, "port": connect_port}}
         args.update(kwargs)
         return await self.request("attach", args)
 
@@ -376,7 +405,9 @@ class StdioDAPClient:
 
     async def variables(self, variablesReference: int):
         """Get variables for a scope."""
-        return await self.request("variables", {"variablesReference": variablesReference})
+        return await self.request(
+            "variables", {"variablesReference": variablesReference}
+        )
 
     async def setExceptionBreakpoints(self, filters: Optional[List[str]] = None):
         """Configure exception breakpoints (empty list to disable)."""
@@ -440,16 +471,20 @@ class StdioDAPClient:
             await self._send(response)
         else:
             # Fail fast on unsupported reverse requests so adapters do not hang.
-            await self._send({
-                "seq": next(self._seq),
-                "type": "response",
-                "request_seq": msg.get("seq"),
-                "success": False,
-                "command": cmd,
-                "message": f"Client does not implement '{cmd}'",
-            })
+            await self._send(
+                {
+                    "seq": next(self._seq),
+                    "type": "response",
+                    "request_seq": msg.get("seq"),
+                    "success": False,
+                    "command": cmd,
+                    "message": f"Client does not implement '{cmd}'",
+                }
+            )
 
-    async def _handle_run_in_terminal(self, req: Dict[str, Any]) -> tuple[bool, Optional[Dict[str, Any]]]:
+    async def _handle_run_in_terminal(
+        self, req: Dict[str, Any]
+    ) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Minimal handler for runInTerminal; fire-and-forget subprocess."""
         try:
             arguments = req.get("arguments") or {}

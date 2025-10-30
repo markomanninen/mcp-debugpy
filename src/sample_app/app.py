@@ -1,7 +1,7 @@
-
 def add(a: int, b: int) -> int:
     # Intentional bug: should be a + b
     return a * b
+
 
 def compute():
     x, y = 3, 4
@@ -11,6 +11,7 @@ def compute():
     for i in range(3):
         total += i + z
     return total
+
 
 if __name__ == "__main__":
     print(compute())

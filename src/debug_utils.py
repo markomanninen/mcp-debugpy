@@ -40,4 +40,3 @@ else:
         except Exception:
             # Logging must never raise.
             pass
-

@@ -93,7 +93,9 @@ def vscode_candidate_paths() -> list[Path]:
     candidates: list[Path] = []
     if system == "Darwin":
         for name in names:
-            candidates.append(home / f"Library/Application Support/{name}/User/settings.json")
+            candidates.append(
+                home / f"Library/Application Support/{name}/User/settings.json"
+            )
     elif system == "Windows":
         appdata = home / "AppData/Roaming"
         for name in names:
@@ -117,7 +119,9 @@ def vscode_candidate_paths() -> list[Path]:
             unique.append(path)
             seen.add(path)
     if not unique:
-        raise RuntimeError("Unable to determine VS Code settings location for this platform.")
+        raise RuntimeError(
+            "Unable to determine VS Code settings location for this platform."
+        )
     return unique
 
 
@@ -169,7 +173,9 @@ def claude_candidate_paths() -> list[Path]:
 
     candidates: list[Path] = []
     if system == "Darwin":
-        candidates.append(home / "Library/Application Support/Claude/claude_desktop_config.json")
+        candidates.append(
+            home / "Library/Application Support/Claude/claude_desktop_config.json"
+        )
     elif system == "Windows":
         candidates.append(home / "AppData/Roaming/Claude/claude_desktop_config.json")
     else:
@@ -188,7 +194,9 @@ def claude_candidate_paths() -> list[Path]:
             unique.append(path)
             seen.add(path)
     if not unique:
-        raise RuntimeError("Unable to determine Claude Desktop configuration location for this platform.")
+        raise RuntimeError(
+            "Unable to determine Claude Desktop configuration location for this platform."
+        )
     return unique
 
 
@@ -234,7 +242,9 @@ def claude_remove(data: Dict[str, object]) -> None:
 # CLI helpers
 
 
-def prompt_action(action: str, existing: Optional[Dict[str, object]], client: str) -> str:
+def prompt_action(
+    action: str, existing: Optional[Dict[str, object]], client: str
+) -> str:
     if action != "prompt":
         return action
 
@@ -285,7 +295,9 @@ def ensure_python_path(path_arg: Optional[str]) -> Path:
             return detected
 
     if not is_interactive():
-        raise RuntimeError("Non-interactive mode requires --python when auto-detection is declined.")
+        raise RuntimeError(
+            "Non-interactive mode requires --python when auto-detection is declined."
+        )
 
     while True:
         entered = input("Enter full path to Python executable: ").strip()

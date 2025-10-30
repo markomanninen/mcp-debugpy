@@ -18,6 +18,7 @@ from dap_stdio_client import StdioDAPClient
 
 APP = Path(__file__).parent / "sample_app" / "app.py"
 
+
 async def main():
     print("=== Direct debugpy.adapter walkthrough (stdio transport) ===\n")
 
@@ -63,7 +64,10 @@ async def main():
     if bp_resp.get("body", {}).get("breakpoints"):
         verified = bp_resp["body"]["breakpoints"][0].get("verified")
         print(f"     ↳ Verified: {verified}")
-    if not bp_resp.get("success", True) and bp_resp.get("message") == "Server is not available":
+    if (
+        not bp_resp.get("success", True)
+        and bp_resp.get("message") == "Server is not available"
+    ):
         waited = await wait_for_initialized_retry("retry setBreakpoints")
         if waited:
             bp_resp = await c.setBreakpoints(str(APP), [bp_line])
@@ -73,9 +77,14 @@ async def main():
     # Step 3b: Exception breakpoints (empty filters is common default)
     print("5. Setting exception breakpoints (none)...")
     exc_resp = await c.setExceptionBreakpoints([])
-    print(f"   ✓ Exception breakpoints response (success={exc_resp.get('success', True)})")
+    print(
+        f"   ✓ Exception breakpoints response (success={exc_resp.get('success', True)})"
+    )
     print(f"     response: {exc_resp}\n")
-    if not exc_resp.get("success", True) and exc_resp.get("message") == "Server is not available":
+    if (
+        not exc_resp.get("success", True)
+        and exc_resp.get("message") == "Server is not available"
+    ):
         waited = await wait_for_initialized_retry("retry setExceptionBreakpoints")
         if waited:
             exc_resp = await c.setExceptionBreakpoints([])
@@ -84,11 +93,9 @@ async def main():
     # Step 4: Launch request (adapter expects configurationDone during this)
     print("6. Launching program (request)...")
     cwd = str(Path(__file__).parent.parent)
-    launch_task = asyncio.create_task(c.launch(
-        program=str(APP),
-        cwd=cwd,
-        console="internalConsole"
-    ))
+    launch_task = asyncio.create_task(
+        c.launch(program=str(APP), cwd=cwd, console="internalConsole")
+    )
     await asyncio.sleep(0)  # let launch request hit the wire
 
     # Step 5b: configurationDone while launch is pending
@@ -183,9 +190,12 @@ async def main():
 
     # Find locals scope
     locals_ref = next(
-        (s["variablesReference"] for s in scopes
-         if s["name"].lower().startswith("locals")),
-        None
+        (
+            s["variablesReference"]
+            for s in scopes
+            if s["name"].lower().startswith("locals")
+        ),
+        None,
     )
 
     if locals_ref:
@@ -254,10 +264,12 @@ async def main():
     print("\nReminder: the bug is in app.py:4 - it uses * instead of +")
     print("That's why x=3, y=4 gives z=12 instead of z=7")
 
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except Exception as e:
         print(f"\n✗ Error: {e}")
         import traceback
+
         traceback.print_exc()

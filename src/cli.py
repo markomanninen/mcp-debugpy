@@ -34,13 +34,13 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
     # Delegate to the mcp_server module's main logic if available
-    if hasattr(server, 'print_help') and ('--help' in argv or '-h' in argv):
+    if hasattr(server, "print_help") and ("--help" in argv or "-h" in argv):
         server.print_help()
         return 0
     # Start the MCP event loop; the module's __main__ behavior uses mcp.run()
     try:
         # Call mcp.run() if exposed (normal startup path)
-        if hasattr(server, 'mcp') and hasattr(server, 'mcp'):
+        if hasattr(server, "mcp") and hasattr(server, "mcp"):
             server.mcp.run()
             return 0
     except SystemExit:
@@ -49,7 +49,7 @@ def main(argv=None):
         print(f"Error starting MCP server: {exc}")
         return 2
     # Fallback: call module-level main if present
-    if hasattr(server, 'main'):
+    if hasattr(server, "main"):
         try:
             return server.main(argv)
         except SystemExit:
