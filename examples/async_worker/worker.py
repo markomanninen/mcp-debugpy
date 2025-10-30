@@ -23,8 +23,8 @@ async def _run_job(job: Job) -> int:
 
 async def gather_results(jobs: Iterable[Job]) -> List[int]:
     tasks = [_run_job(job) for job in jobs]
-    # BUG: missing await on asyncio.gather
-    results = asyncio.gather(*tasks)
+    # Correct usage: await asyncio.gather to run tasks and collect results
+    results = await asyncio.gather(*tasks)
     return list(results)
 
 

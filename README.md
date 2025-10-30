@@ -1,5 +1,7 @@
 # MVP: Agent-steerable test & debug loop (MCP + DAP + pytest)
 
+[![CI](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml/badge.svg)](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml)
+
 This minimal project shows how an agent could drive your Python test/debug loop:
 
 - **pytest JSON** reports for machine-readable failures
@@ -32,6 +34,21 @@ The sample app intentionally contains a bug to demonstrate failing tests and an 
 ### Optional helper
 
 Run `python scripts/configure_mcp_clients.py` to detect existing VS Code/Claude MCP entries, interactively add/update/remove them, and generate a Claude snippet. Works on macOS, Linux, and Windows.
+
+## Developer tooling
+
+This repository uses pre-commit hooks and CI for linting, formatting, and typing checks.
+
+Install hooks locally:
+
+```bash
+source .venv/bin/activate
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+If you prefer to run hooks manually, the CI runs `ruff`, `black --check`, and `mypy` before `pytest`.
 
 📘 For a step-by-step walkthrough of every MCP tool (including suggested agent workflows for VS Code and Claude), see [`docs/mcp_usage.md`](docs/mcp_usage.md).
 

@@ -38,3 +38,19 @@ where = ["src"]
 
 [project.scripts]
 mcp-debug-server = "cli:main"
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C", "N", "B", "RUF"]
+extend-ignore = ["E203", "E501", "N802", "N803", "C901"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.mypy]
+files = ["src"]
+ignore_missing_imports = true
+strict = false

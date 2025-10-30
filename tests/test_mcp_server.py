@@ -23,7 +23,9 @@ def fake_stdio_client(monkeypatch):
         def __init__(self):
             self.started = False
             self.initialized_flag = False
-            self.wait_for_initialized_calls: List[float] = []
+            from typing import Optional
+
+            self.wait_for_initialized_calls: List[Optional[float]] = []
             self.set_breakpoints_calls = 0
             self.set_exception_calls = 0
             self._exception_failures_remaining = 1

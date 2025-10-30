@@ -756,13 +756,13 @@ VS Code - Add to settings.json under "mcp.servers":
 
 Claude Desktop - Add to claude_desktop_config.json under "mcpServers":
 {
-  "mcpServers": {
-    "agentDebug": {
-      "command": "/path/to/your/project/.venv/bin/python", 
-      "args": ["src/mcp_server.py"],
-      "cwd": "/path/to/your/project"
+    "mcpServers": {
+        "agentDebug": {
+            "command": "/path/to/your/project/.venv/bin/python",
+            "args": ["src/mcp_server.py"],
+            "cwd": "/path/to/your/project"
+        }
     }
-  }
 }
 
 Available MCP Tools:
@@ -770,30 +770,24 @@ Available MCP Tools:
 
 Testing Tools:
 --------------
-• run_tests_json(pytest_args: Optional[List[str]]) 
-  Run pytest with JSON report output
-  
+• run_tests_json(pytest_args: Optional[List[str]])
+    Run pytest with JSON report output
 • run_tests_focus(keyword: str)
   Run focused subset of tests using pytest -k <keyword>
 
 Debug Adapter Protocol (DAP) Tools:
 -----------------------------------
-• dap_launch(program: str, cwd: Optional[str], breakpoints: Optional[List[int]], 
+• dap_launch(program: str, cwd: Optional[str], breakpoints: Optional[List[int]],
              console: str, wait_for_breakpoint: bool, breakpoint_timeout: float)
-  Launch a program under debugpy.adapter with optional breakpoints
-  
+    Launch a program under debugpy.adapter with optional breakpoints
 • dap_set_breakpoints(source_path: str, lines: List[int])
-  Set breakpoints by absolute source path and line numbers
-  
+    Set breakpoints by absolute source path and line numbers
 • dap_continue(thread_id: Optional[int])
-  Continue execution on the given thread
-  
+    Continue execution on the given thread
 • dap_locals()
-  Return locals from the top stack frame of the first thread
-  
+    Return locals from the top stack frame of the first thread
 • dap_wait_for_event(name: str, timeout: float)
-  Wait for a specific DAP event (e.g., 'stopped')
-  
+    Wait for a specific DAP event (e.g., 'stopped')
 • dap_shutdown()
   Terminate the current DAP adapter session
 

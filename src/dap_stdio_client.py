@@ -118,7 +118,8 @@ class StdioDAPClient:
         await self._connect_to_adapter(endpoints_file)
         if self.proc.stderr:
             self._stderr_task = asyncio.create_task(self._drain_stderr())
-        asyncio.create_task(self._reader_task())
+        # Keep a reference to the reader task so it can be awaited/cancelled later
+        self._reader_task_handle = asyncio.create_task(self._reader_task())
 
     async def _connect_to_adapter(self, endpoints_file: Path) -> None:
         timeout = 5.0
@@ -159,7 +160,7 @@ class StdioDAPClient:
             )
             raise RuntimeError(
                 f"Unable to connect to debugpy.adapter at {host}:{port}: {exc}"
-            )
+            ) from exc
 
         log_debug(f"dap_stdio_client: connected to adapter at {host}:{port}")
 
@@ -353,7 +354,7 @@ class StdioDAPClient:
             "setBreakpoints",
             {
                 "source": {"path": source_path},
-                    "breakpoints": [{"line": line} for line in lines],
+                "breakpoints": [{"line": line} for line in lines],
             },
         )
 
