@@ -32,3 +32,6 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+mcp-debug-server = "cli:main"
