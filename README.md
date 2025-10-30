@@ -1,6 +1,7 @@
 # MVP: Agent-steerable test & debug loop (MCP + DAP + pytest)
 
 [![CI](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml/badge.svg)](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/markomanninen/mcp-debugpy?label=release&sort=semver)](https://github.com/markomanninen/mcp-debugpy/releases)
 
 This minimal project shows how an agent could drive your Python test/debug loop:
 
@@ -19,6 +20,18 @@ cd mvp-agent-debug
 source .venv/bin/activate
 python src/dap_stdio_direct.py        # direct adapter walkthrough (waits for breakpoint)
 python -m pytest tests/test_mcp_server.py  # verify MCP tooling via fakes
+```
+
+Install (from source):
+
+```bash
+python -m pip install -e '.[dev]'
+```
+
+Run the CLI after activating the project virtualenv:
+
+```bash
+mcp-debug-server --help
 ```
 
 Then register the MCP server with VS Code and/or Claude so they can launch it automatically:
