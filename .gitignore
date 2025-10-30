@@ -6,6 +6,17 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env/
+.pytest_cache/
+.venv/
+.env
+.env.*
+venv/
+env/
+
+# Pytest / reports
+pytest-report.json
+.pytest-report.json
+.pytest_cache/
 
 # Reports / logs
 *.log
@@ -13,6 +24,18 @@ pytest-report.json
 .pytest-report.json
 coverage.xml
 htmlcov/
+
+# Packaging / build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Type checking/cache
+.mypy_cache/
+.pyre/
 
 # OS files
 .DS_Store
@@ -24,3 +47,7 @@ Thumbs.db
 
 # Local artifacts
 /tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
