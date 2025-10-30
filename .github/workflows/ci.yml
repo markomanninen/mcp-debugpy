@@ -27,6 +27,10 @@ jobs:
           # Install runtime and test dependencies (skip dev extras that require ruff)
           python -m pip install -e .
           python -m pip install pytest pytest-asyncio pytest-json-report
+          # Install linters required by the workflow
+          python -m pip install black mypy
+          # Optional: try to pre-install ruff (prefer binary) but don't fail if unavailable
+          python -m pip install "ruff>=0.16.0" --prefer-binary --index-url https://pypi.org/simple || true
       - name: Run linters and type checks
         run: |
           # Ruff for linting (optional: skip if not installed)
@@ -34,7 +38,7 @@ jobs:
           # Black check
           python -m black --check .
           # Mypy type check
-          python -m mypy src || echo "mypy failed or missing; check types locally"
+          python -m mypy src
       - name: Run tests
         run: |
           python -m pytest -q
