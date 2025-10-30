@@ -15,10 +15,19 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+      - name: Install Rust toolchain (needed if ruff must be built from source)
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install .[dev]
+          python -m pip install --upgrade pip setuptools wheel
+          # Try to pre-install ruff (prefer binary wheel) so resolver won't fail
+          python -m pip install "ruff>=0.16.0" --prefer-binary --index-url https://pypi.org/simple || true
+          # Install project including dev extras (linters may already be present)
+          python -m pip install -e '.[dev]' --index-url https://pypi.org/simple
       - name: Run linters and type checks
         run: |
           # Ruff for linting
