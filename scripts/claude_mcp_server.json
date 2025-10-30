@@ -1,0 +1,9 @@
+{
+  "args": [
+    "/Users/markomanninen/Downloads/mvp-agent-debug/src/mcp_server.py"
+  ],
+  "command": "/Users/markomanninen/Downloads/mvp-agent-debug/.venv/bin/python",
+  "environment": {},
+  "id": "agent-debug-tools",
+  "working_directory": "/Users/markomanninen/Downloads/mvp-agent-debug"
+}

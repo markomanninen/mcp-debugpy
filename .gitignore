@@ -1,0 +1,26 @@
+# Python / virtualenv
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+.env/
+
+# Reports / logs
+*.log
+pytest-report.json
+.pytest-report.json
+coverage.xml
+htmlcov/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor configs
+.idea/
+.vscode/
+
+# Local artifacts
+/tmp/
