@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from ..worker import Job, gather_results

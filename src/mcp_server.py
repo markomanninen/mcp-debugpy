@@ -16,7 +16,6 @@ The server provides tools for:
 - Capturing the latest stopped event & breakpoint cache so agents can recover state
 """
 
-import argparse
 import asyncio
 import json
 import os

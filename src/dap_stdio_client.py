@@ -353,7 +353,7 @@ class StdioDAPClient:
             "setBreakpoints",
             {
                 "source": {"path": source_path},
-                "breakpoints": [{"line": l} for l in lines],
+                    "breakpoints": [{"line": line} for line in lines],
             },
         )
 
@@ -456,8 +456,6 @@ class StdioDAPClient:
         """Dispatch adapter-originated requests."""
         cmd = msg.get("command")
         if cmd == "runInTerminal":
-            arguments = msg.get("arguments") or {}
-            # print(f"[dap:runInTerminal] args={arguments.get('args')} cwd={arguments.get('cwd')}", file=sys.stderr, flush=True)
             ok, body = await self._handle_run_in_terminal(msg)
             response = {
                 "seq": next(self._seq),
