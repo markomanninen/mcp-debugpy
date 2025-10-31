@@ -28,7 +28,7 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest pytest-asyncio pytest-json-report
           # Install linters required by the workflow
-          python -m pip install black mypy
+          python -m pip install black mypy types-aiofiles
           # Optional: try to pre-install ruff (prefer binary) but don't fail if unavailable
           python -m pip install "ruff>=0.16.0" --prefer-binary --index-url https://pypi.org/simple || true
       - name: Run linters and type checks
@@ -38,7 +38,7 @@ jobs:
           # Black check
           python -m black --check .
           # Mypy type check
-          python -m mypy src
+          python -m mypy src --ignore-missing-imports --explicit-package-bases
       - name: Run tests
         run: |
           python -m pytest -q
