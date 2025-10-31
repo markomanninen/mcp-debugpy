@@ -2,7 +2,6 @@ import asyncio
 import json
 import itertools
 import os
-import subprocess
 import sys
 import tempfile
 from collections import deque
@@ -89,6 +88,7 @@ class StdioDAPClient:
         log_debug(
             f"dap_stdio_client.start: launching adapter cmd={self.adapter_cmd} env_file={endpoints_file}"
         )
+
         try:
             self.proc = await asyncio.create_subprocess_exec(
                 *self.adapter_cmd,
