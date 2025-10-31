@@ -946,7 +946,9 @@ async def dap_validate_breakpoint_line(source_path: str, line: int) -> Dict[str,
             for i in range(line, min(line + 5, len(lines))):
                 next_line = lines[i].strip()
                 if next_line and not next_line.startswith("#"):
-                    preview = next_line[:50] + "..." if len(next_line) > 50 else next_line
+                    preview = (
+                        next_line[:50] + "..." if len(next_line) > 50 else next_line
+                    )
                     suggestions.append(f"Consider line {i + 1}: {preview}")
                     break
 

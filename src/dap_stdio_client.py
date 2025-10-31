@@ -253,16 +253,16 @@ class StdioDAPClient:
                 message = "Debug adapter connection closed"
                 if exit_code is not None:
                     if exit_code == 0:
-                        message += f" (program exited successfully with code {exit_code})"
+                        message += (
+                            f" (program exited successfully with code {exit_code})"
+                        )
                     else:
                         message += f" (program crashed with exit code {exit_code})"
 
                 if detail:
                     message = f"{message}.\nAdapter stderr:\n{detail}"
 
-                message += (
-                    "\n\nTip: Use stop_on_entry=True or verify breakpoints are on executable lines"
-                )
+                message += "\n\nTip: Use stop_on_entry=True or verify breakpoints are on executable lines"
                 raise EOFError(message)
             if line == b"\r\n":
                 break
