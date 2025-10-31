@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mcp-debugpy"
 version = "0.2.0"
-description = "MVP: agent-steerable debug loop using MCP, DAP and debugpy (demo & examples)"
+description = "MCP server for AI-assisted Python debugging using debugpy and Debug Adapter Protocol"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }

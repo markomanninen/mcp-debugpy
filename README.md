@@ -1,9 +1,11 @@
-# MVP: Agent-steerable test & debug loop (MCP + DAP + pytest)
+# mcp-debugpy
 
 [![CI](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml/badge.svg)](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/markomanninen/mcp-debugpy?label=release&sort=semver)](https://github.com/markomanninen/mcp-debugpy/releases)
 
-This minimal project shows how an agent could drive your Python test/debug loop:
+MCP server for AI-assisted Python debugging using debugpy and Debug Adapter Protocol.
+
+Enable AI agents to debug your Python code through natural language. This MCP server provides:
 
 - **pytest JSON** reports for machine-readable failures
 - **DAP (Debug Adapter Protocol)** control of a live `debugpy` session (breakpoints, continue, variables)
