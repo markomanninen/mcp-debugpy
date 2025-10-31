@@ -57,3 +57,4 @@ ignore_missing_imports = true
 strict = false
 explicit_package_bases = true
 mypy_path = "src:examples"
+exclude = ["src/sample_app"]

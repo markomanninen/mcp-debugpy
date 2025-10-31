@@ -13,5 +13,5 @@ repos:
     hooks:
       - id: mypy
         args: ["--ignore-missing-imports", "--explicit-package-bases"]
-        exclude: ^examples/
+        exclude: ^(examples/|src/sample_app/)
         additional_dependencies: [types-aiofiles>=25.0.0]
