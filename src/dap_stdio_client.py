@@ -2,7 +2,6 @@ import asyncio
 import json
 import itertools
 import os
-import subprocess
 import sys
 import tempfile
 from collections import deque
@@ -10,6 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from debug_utils import log_debug
+
+_python_executable_path: Optional[Path] = None
 
 
 class StdioDAPClient:
@@ -38,19 +39,27 @@ class StdioDAPClient:
 
     def _get_python_executable(self) -> Path:
         """Get the correct Python executable, preferring virtual environment if available."""
+        global _python_executable_path
+        if _python_executable_path and _python_executable_path.exists():
+            return _python_executable_path
+
         # Check if we're in a virtual environment
         venv_path = Path.cwd() / ".venv" / "bin" / "python"
         if venv_path.exists():
+            _python_executable_path = venv_path
             return venv_path
 
         # Check for other common venv locations
         for venv_name in [".venv", "venv", "env"]:
             venv_python = Path.cwd() / venv_name / "bin" / "python"
             if venv_python.exists():
+                _python_executable_path = venv_python
                 return venv_python
 
         # Fall back to sys.executable
-        return Path(sys.executable)
+        fallback = Path(sys.executable)
+        _python_executable_path = fallback
+        return fallback
 
     async def start(self):
         """Start the debugpy.adapter subprocess."""
@@ -79,6 +88,7 @@ class StdioDAPClient:
         log_debug(
             f"dap_stdio_client.start: launching adapter cmd={self.adapter_cmd} env_file={endpoints_file}"
         )
+
         try:
             self.proc = await asyncio.create_subprocess_exec(
                 *self.adapter_cmd,
@@ -484,29 +494,5 @@ class StdioDAPClient:
     async def _handle_run_in_terminal(
         self, req: Dict[str, Any]
     ) -> tuple[bool, Optional[Dict[str, Any]]]:
-        """Minimal handler for runInTerminal; fire-and-forget subprocess."""
-        try:
-            arguments = req.get("arguments") or {}
-            cmd = arguments.get("args") or []
-            if isinstance(cmd, str):
-                cmd = [cmd]
-            if not cmd:
-                return False, None
-
-            cwd = arguments.get("cwd")
-            env_overrides = arguments.get("env") or {}
-            env = os.environ.copy()
-            for key, value in env_overrides.items():
-                if value is None:
-                    env.pop(key, None)
-                else:
-                    env[key] = value
-
-            proc = subprocess.Popen(cmd, cwd=cwd, env=env)
-            body = {
-                "processId": proc.pid or 0,
-                "shellProcessId": 0,
-            }
-            return True, body
-        except Exception:
-            return False, None
+        """runInTerminal is disabled for security; do not execute external commands."""
+        return False, None

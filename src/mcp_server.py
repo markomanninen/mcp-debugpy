@@ -5,6 +5,13 @@ IMPORTANT: This MCP server is designed to be automatically started by MCP client
 (VS Code, Claude Desktop, etc.). You do NOT need to run this manually from the
 command line. The client will automatically start this server when needed.
 
+Breakpoint registration note: the server implements a resilient registration flow
+for debugger breakpoints: an initial attempt is made before `configurationDone`,
+the server retries after the adapter sends `initialized` (this covers both the
+main program breakpoints and entries provided via `breakpoints_by_source`), and
+a final retry pass occurs after the first `stopped` event to catch imported-module
+timing races where modules were not yet loaded when the earlier attempts ran.
+
 Configuration examples:
 - VS Code: Add to settings.json under "mcp.servers"
 - Claude Desktop: Add to claude_desktop_config.json under "mcpServers"
@@ -19,9 +26,12 @@ The server provides tools for:
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import aiofiles
 from textwrap import dedent
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,9 +44,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_agent_instructions() -> str:
+    global _agent_instructions_cache
+    if _agent_instructions_cache is not None:
+        return _agent_instructions_cache
+
     instructions_path = PROJECT_ROOT / "agent_instructions.md"
     try:
-        return instructions_path.read_text(encoding="utf-8")
+        _agent_instructions_cache = instructions_path.read_text(encoding="utf-8")
+        return _agent_instructions_cache
     except OSError:
         return (
             "Agent Debug Tools: use repo-relative paths (e.g. 'src/sample_app/app.py') "
@@ -44,10 +59,12 @@ def _load_agent_instructions() -> str:
         )
 
 
+_agent_instructions_cache: Optional[str] = None
 mcp = FastMCP("agent-debug-tools", instructions=_load_agent_instructions())
 
 _breakpoint_registry: Dict[str, List[int]] = {}
 _last_stopped_event: Optional[Dict[str, Any]] = None
+_python_executable_path: Optional[Path] = None
 
 
 @mcp.tool()
@@ -115,11 +132,20 @@ def ensure_demo_program(directory: Optional[str] = None) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
+async def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
     """Read a UTF-8 text file so agents can inspect generated code before debugging."""
     file_path = Path(path).expanduser()
     if not file_path.is_absolute():
         file_path = (Path.cwd() / file_path).resolve()
+
+    # Security: Ensure the path is within the project directory
+    if not file_path.is_relative_to(Path.cwd()):
+        return {
+            "error": "Path traversal detected",
+            "requested": path,
+            "resolved": str(file_path),
+        }
+
     if not file_path.exists():
         return {
             "error": "File does not exist",
@@ -127,7 +153,8 @@ def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
             "resolved": str(file_path),
         }
     try:
-        data = file_path.read_text(encoding="utf-8")
+        async with aiofiles.open(file_path, mode="r", encoding="utf-8") as f:
+            data = await f.read()
     except UnicodeDecodeError:
         return {
             "error": "File is not UTF-8 text",
@@ -146,11 +173,16 @@ def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
 
 def _get_python_executable() -> Path:
     """Get the correct Python executable, preferring virtual environment if available."""
+    global _python_executable_path
+    if _python_executable_path and _python_executable_path.exists():
+        return _python_executable_path
+
     # First check if we're already in a virtual environment via VIRTUAL_ENV
     if "VIRTUAL_ENV" in os.environ:
         venv_python = Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python"
         if venv_python.exists():
             log_debug(f"_get_python_executable: using VIRTUAL_ENV {venv_python}")
+            _python_executable_path = venv_python
             return venv_python
 
     # Check if we're in a virtual environment relative to current working directory
@@ -158,6 +190,7 @@ def _get_python_executable() -> Path:
     venv_path = cwd / ".venv" / "bin" / "python"
     if venv_path.exists():
         log_debug(f"_get_python_executable: using cwd .venv {venv_path}")
+        _python_executable_path = venv_path
         return venv_path
 
     # Check for other common venv locations
@@ -165,6 +198,7 @@ def _get_python_executable() -> Path:
         venv_python = cwd / venv_name / "bin" / "python"
         if venv_python.exists():
             log_debug(f"_get_python_executable: using cwd venv {venv_python}")
+            _python_executable_path = venv_python
             return venv_python
 
     # Check parent directories for virtual environments
@@ -173,11 +207,13 @@ def _get_python_executable() -> Path:
             venv_python = parent / venv_name / "bin" / "python"
             if venv_python.exists():
                 log_debug(f"_get_python_executable: using ancestor venv {venv_python}")
+                _python_executable_path = venv_python
                 return venv_python
 
     # Fall back to sys.executable
     fallback = Path(sys.executable)
     log_debug(f"_get_python_executable: falling back to sys.executable {fallback}")
+    _python_executable_path = fallback
     return fallback
 
 
@@ -193,6 +229,11 @@ def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
     Args:
         pytest_args: extra pytest args (e.g., ["-k", "unit"])
     """
+    if pytest_args:
+        for arg in pytest_args:
+            if re.search(r'[;&|`"\'$()]', arg):
+                return {"error": "Invalid characters in pytest_args"}
+
     report = Path(".pytest-report.json")
     python_exec = _get_python_executable()
     if not python_exec.exists():
@@ -415,16 +456,72 @@ async def dap_launch(
     program: str,
     cwd: Optional[str] = None,
     breakpoints: Optional[List[int]] = None,
+    breakpoints_by_source: Optional[Dict[str, List[int]]] = None,
+    stop_on_entry: bool = False,
     console: str = "internalConsole",
     wait_for_breakpoint: bool = True,
     breakpoint_timeout: float = 5.0,
 ) -> Dict[str, Any]:
-    """Launch a Python program under debugpy.adapter and optionally pause at a breakpoint.
+    """Launch a Python program under debugpy adapter and optionally pause at a breakpoint.
 
-    Best practice (per the DAP specification): register breakpoints before calling
-    `configurationDone` to avoid racing the adapter. This helper automatically performs
-    the initialize → setBreakpoints → launch → configurationDone sequence recommended in
-    https://microsoft.github.io/debug-adapter-protocol/specification#launch
+    This tool implements the DAP-recommended initialization sequence:
+    initialize → setBreakpoints → launch → configurationDone → wait_for_stopped
+
+    **Parameters:**
+    - program: Path to the Python script to debug (absolute or relative to cwd)
+    - cwd: Working directory for the launched process (defaults to program's parent dir)
+    - breakpoints: Line numbers for breakpoints in the main program file
+    - breakpoints_by_source: Dict mapping source paths to line numbers for breakpoints
+      in additional files (e.g., {"examples/gui_counter/counter.py": [16]})
+    - stop_on_entry: If True, adds a breakpoint at line 1 of the program
+    - console: Console type ("internalConsole", "integratedTerminal", or "externalTerminal")
+    - wait_for_breakpoint: If True, waits for a stopped event before returning
+    - breakpoint_timeout: Maximum seconds to wait for stopped event
+
+    **Breakpoint Registration Flow:**
+    1. Initial attempt: setBreakpoints called before configurationDone (may fail if adapter not ready)
+    2. Retry after init: If adapter wasn't ready, retry after initialized event (applies to both
+       main program breakpoints AND breakpoints_by_source)
+    3. **Retry after stop**: After first stopped event, retry any still-unverified breakpoints_by_source
+       entries. This ensures module breakpoints are registered even if modules weren't loaded yet.
+
+    **Path Resolution for breakpoints_by_source:**
+    Relative paths are resolved in this order of preference:
+    1. PROJECT_ROOT / source_path (preferred for repo-relative paths)
+    2. cwd / source_path (if cwd provided and source doesn't look repo-relative)
+    3. Path(source_path).resolve() (fallback)
+
+    The first existing path is chosen, or PROJECT_ROOT variant if none exist.
+
+    **Return Value:**
+    Dict containing responses from each step:
+    - initialize, launch, configurationDone: DAP responses
+    - setBreakpoints, setBreakpointsBySource: Initial breakpoint registration attempts
+    - setBreakpointsRetryAfterInit: Retry results after initialized event (if needed)
+    - setBreakpointsBySourceRetryAfterStop: Retry results after stopped event (NEW)
+    - stoppedEvent: The stopped event if wait_for_breakpoint=True
+    - stopOnEntryRequested: True if stop_on_entry was requested
+
+    **Example Usage:**
+    ```python
+    # Launch with breakpoints in main program and imported module
+    result = await dap_launch(
+        program="examples/gui_counter/run_counter_debug.py",
+        cwd="examples/gui_counter",
+        breakpoints=[8],  # Main program breakpoint
+        breakpoints_by_source={
+            "examples/gui_counter/counter.py": [16]  # Module breakpoint
+        },
+        stop_on_entry=True,
+        wait_for_breakpoint=True
+    )
+
+    # Check if breakpoints were registered
+    stopped = result.get("stoppedEvent")
+    retry_results = result.get("setBreakpointsBySourceRetryAfterStop", {})
+    ```
+
+    See: https://microsoft.github.io/debug-adapter-protocol/specification#launch
     """
     global _last_stopped_event
 
@@ -498,15 +595,119 @@ async def dap_launch(
         result["initializedEarly"] = False
 
     # Step 3: Set breakpoints BEFORE configurationDone
-    if breakpoints:
+    # Support breakpoints for the program file (convenience) and for arbitrary
+    # additional source files via `breakpoints_by_source` so callers can atomically
+    # register all breakpoints before the target runs (avoids races for short-lived programs).
+    # Respect an explicit stop-on-entry request by ensuring a breakpoint at
+    # the first line of the program is registered. We keep track of the
+    # original program breakpoints so we can restore them after the first stop
+    # if the caller didn't request line 1 explicitly.
+    original_program_breakpoints = list(breakpoints) if breakpoints else []
+    program_breakpoints = list(original_program_breakpoints)
+    if stop_on_entry and 1 not in program_breakpoints:
+        program_breakpoints.insert(0, 1)
+
+    if program_breakpoints:
         bp_resp, bp_retry = await _resilient_set_breakpoints(
-            client, str(program_path), breakpoints, wait_timeout=5.0
+            client, str(program_path), program_breakpoints, wait_timeout=5.0
         )
         result["setBreakpoints"] = bp_resp
         if bp_retry:
             result["setBreakpointsInitial"] = bp_retry
-        if bp_resp.get("success", True):
+        if bp_resp.get("success", True) and breakpoints:
             _record_breakpoints(str(program_path), breakpoints)
+    else:
+        # No program breakpoints requested; ensure we record an empty entry
+        result["setBreakpoints"] = {"skipped": "no program breakpoints configured"}
+
+    # Register any additional breakpoints specified by absolute (or repo-relative)
+    # source paths. Each entry is registered with the adapter before launch so the
+    # target process will pause even if it imports those modules quickly.
+    if breakpoints_by_source:
+        extra_results: Dict[str, Any] = {}
+        for src, lines in breakpoints_by_source.items():
+            # Resolve src robustly to handle callers passing repo-relative paths
+            # or paths relative to the provided cwd. Build a small ordered set of
+            # candidate absolute paths and pick the first that exists. Prefer
+            # resolving from PROJECT_ROOT to avoid accidentally creating nested
+            # duplicate paths like
+            # '/.../examples/gui_counter/examples/gui_counter/counter.py'.
+            src_path = Path(src)
+            candidate_paths: List[Path] = []
+            # Always prefer the PROJECT_ROOT-based resolution first for repo
+            # relative entries, then try search_base, and finally the plain
+            # resolved value. Keep ordering deterministic.
+            try:
+                proj_candidate = (PROJECT_ROOT / src_path).resolve()
+            except Exception:
+                proj_candidate = PROJECT_ROOT / src_path
+            try:
+                search_candidate = (search_base / src_path).resolve()
+            except Exception:
+                search_candidate = search_base / src_path
+            try:
+                plain_candidate = src_path.resolve()
+            except Exception:
+                plain_candidate = src_path
+
+            # Prefer PROJECT_ROOT for repo-style paths (those starting with a
+            # top-level folder name present in the repo). This avoids using a
+            # cwd-prefixed duplicate when callers pass repo-relative paths.
+            first_part = src_path.parts[0] if src_path.parts else None
+            top_level_names = {p.name for p in PROJECT_ROOT.iterdir()}
+            if src_path.is_absolute():
+                candidates_order = [plain_candidate]
+            else:
+                if first_part and first_part in top_level_names:
+                    # repo-relative: prefer PROJECT_ROOT and the plain resolution
+                    # (which will often be the same) but avoid search_base which can
+                    # create nested duplicate paths when search_base already points
+                    # inside the repository.
+                    candidates_order = [proj_candidate, plain_candidate]
+                else:
+                    candidates_order = [
+                        proj_candidate,
+                        search_candidate,
+                        plain_candidate,
+                    ]
+
+            # Deduplicate while preserving order
+            seen = set()
+            for cand in candidates_order:
+                cand_str = str(cand)
+                if cand_str in seen:
+                    continue
+                seen.add(cand_str)
+                candidate_paths.append(Path(cand_str))
+
+            # Pick the first existing candidate, else default to PROJECT_ROOT variant
+            chosen = None
+            for cand in candidate_paths:
+                try:
+                    if cand.exists():
+                        chosen = cand
+                        break
+                except Exception:
+                    # If permission or other error, skip
+                    continue
+            if chosen is None:
+                chosen = proj_candidate
+            try:
+                resp, initial = await _resilient_set_breakpoints(
+                    client, str(chosen), lines, wait_timeout=5.0
+                )
+            except Exception as exc:  # defensive
+                resp = {"success": False, "message": str(exc)}
+                initial = None
+            extra_results[str(chosen)] = {"response": resp}
+            if initial and initial is not resp:
+                extra_results[str(chosen)]["initial"] = initial
+            if resp.get("success", True):
+                _record_breakpoints(str(chosen), lines)
+        result["setBreakpointsBySource"] = extra_results
+
+    # Record that stop_on_entry was requested so callers can inspect the outcome
+    result["stopOnEntryRequested"] = bool(stop_on_entry)
 
     # Step 4: Set exception breakpoints
     exc_resp, exc_retry = await _resilient_set_exception_breakpoints(
@@ -517,11 +718,23 @@ async def dap_launch(
         result["setExceptionBreakpointsInitial"] = exc_retry
 
     # Step 5: Launch (async task)
+    # Ensure the launched program has the repository root on PYTHONPATH so
+    # examples can use package-style imports regardless of the chosen cwd.
+    launch_env = os.environ.copy()
+    repo_root_str = str(PROJECT_ROOT)
+    existing_pp = launch_env.get("PYTHONPATH", "")
+    if existing_pp:
+        # Prepend repo root to preserve existing PYTHONPATH entries
+        launch_env["PYTHONPATH"] = repo_root_str + os.pathsep + existing_pp
+    else:
+        launch_env["PYTHONPATH"] = repo_root_str
+
     launch_task = asyncio.create_task(
         client.launch(
             program=str(program_path),
             cwd=str(launch_cwd),
             console=console,
+            env=launch_env,
         )
     )
 
@@ -548,6 +761,28 @@ async def dap_launch(
             )
             result["setBreakpointsRetryAfterInit"] = bp_resp_retry
 
+        # Retry breakpoints_by_source if they failed initially
+        if breakpoints_by_source and result.get("setBreakpointsBySource"):
+            retry_by_source = {}
+            for source_path_key, source_data in result[
+                "setBreakpointsBySource"
+            ].items():
+                response = source_data.get("response", {})
+                # Retry if failed or not successful
+                if not response.get("success", False):
+                    # Extract lines from original breakpoints_by_source dict
+                    # Need to find which key matches this resolved path
+                    for src_rel, lines in breakpoints_by_source.items():
+                        # If source_path_key ends with the relative path, it's a match
+                        if source_path_key.endswith(src_rel.replace("/", os.sep)):
+                            retry_resp, _ = await _resilient_set_breakpoints(
+                                client, source_path_key, lines, wait_timeout=0.0
+                            )
+                            retry_by_source[source_path_key] = retry_resp
+                            break
+            if retry_by_source:
+                result["setBreakpointsBySourceRetryAfterInit"] = retry_by_source
+
         # Retry exception breakpoints if they failed initially
         if not exc_resp.get("success", True):
             exc_resp_retry, _ = await _resilient_set_exception_breakpoints(
@@ -570,6 +805,69 @@ async def dap_launch(
             result["stoppedEvent"] = {"timeout": breakpoint_timeout}
     elif not breakpoints:
         result["stoppedEvent"] = {"skipped": "no breakpoints configured"}
+
+    # Step 9: After first stop (stop-on-entry or breakpoint), retry any
+    # breakpoints_by_source that weren't successfully verified. At this point
+    # the adapter is stable and we have a window before module imports happen.
+    if result.get("stoppedEvent") and breakpoints_by_source:
+        retry_results = {}
+        for src_rel, lines in breakpoints_by_source.items():
+            # Build candidate paths the same way as in step 3
+            first_part = Path(src_rel).parts[0] if Path(src_rel).parts else ""
+            proj_candidate = PROJECT_ROOT / src_rel
+            search_candidate = (
+                (search_base / src_rel) if search_base else proj_candidate
+            )
+            plain_candidate = Path(src_rel).resolve()
+
+            # Prefer PROJECT_ROOT resolution if the source path looks repo-relative
+            if first_part and first_part in top_level_names:
+                candidates_order = [proj_candidate, plain_candidate]
+            else:
+                candidates_order = [proj_candidate, search_candidate, plain_candidate]
+
+            # Deduplicate
+            seen = set()
+            candidate_paths = []
+            for cand in candidates_order:
+                cand_str = str(cand)
+                if cand_str in seen:
+                    continue
+                seen.add(cand_str)
+                candidate_paths.append(Path(cand_str))
+
+            # Pick first existing, else default to PROJECT_ROOT
+            chosen = None
+            for cand in candidate_paths:
+                try:
+                    if cand.exists():
+                        chosen = cand
+                        break
+                except Exception:
+                    continue
+            if chosen is None:
+                chosen = proj_candidate
+
+            chosen_str = str(chosen)
+
+            # Check if this source already has verified breakpoints in the registry
+            if _breakpoint_registry.get(chosen_str):
+                # Already registered, skip
+                continue
+
+            # Retry setting breakpoints for this source
+            try:
+                resp, _ = await _resilient_set_breakpoints(
+                    client, chosen_str, lines, wait_timeout=0.5
+                )
+                retry_results[chosen_str] = resp
+                if resp.get("success", True):
+                    _record_breakpoints(chosen_str, lines)
+            except Exception as exc:
+                retry_results[chosen_str] = {"success": False, "message": str(exc)}
+
+        if retry_results:
+            result["setBreakpointsBySourceRetryAfterStop"] = retry_results
 
     return result
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-debugpy"
-version = "0.1.0"
+version = "0.2.0"
 description = "MVP: agent-steerable debug loop using MCP, DAP and debugpy (demo & examples)"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -24,6 +24,7 @@ dev = [
   "ruff>=0.16.0",
   "black>=24.1.0",
   "mypy>=1.9.0",
+  "types-aiofiles>=25.0.0",
 ]
 
 [project.urls]
@@ -54,3 +55,5 @@ target-version = ["py311"]
 files = ["src"]
 ignore_missing_imports = true
 strict = false
+explicit_package_bases = true
+mypy_path = "src:examples"

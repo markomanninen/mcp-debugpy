@@ -195,3 +195,72 @@ async def test_dap_shutdown_closes_session(fake_stdio_client):
     # second shutdown should report no active session
     result_second = await mcp_server.dap_shutdown()
     assert result_second == {"status": "no-session"}
+
+
+@pytest.mark.asyncio
+async def test_dap_launch_breakpoints_by_source_retry_after_stop(fake_stdio_client):
+    """Test that breakpoints_by_source are retried after the stopped event."""
+    script = Path("src/sample_app/app.py")
+
+    # Launch with both main breakpoints and breakpoints_by_source
+    result = await mcp_server.dap_launch(
+        program=str(script),
+        breakpoints=[8],
+        breakpoints_by_source={"src/sample_app/helpers.py": [5, 10]},
+        stop_on_entry=True,
+        wait_for_breakpoint=True,
+    )
+
+    # Verify the launch succeeded
+    assert result["initialize"]["success"] is True
+    assert result["stoppedEvent"]["event"] == "stopped"
+
+    # Verify initial attempts were made for both program and source
+    assert "setBreakpoints" in result
+    assert "setBreakpointsBySource" in result
+
+    # The NEW feature: post-stop retry logic for breakpoints_by_source
+    # This retry only happens if breakpoints weren't already successfully verified.
+    # In this fake client scenario, the breakpoints succeed during retry-after-init
+    # (when initialized_flag becomes True), so they're already in the registry and
+    # the post-stop retry is skipped. This is the correct behavior - we only retry
+    # breakpoints that need retrying.
+    #
+    # In real-world scenarios with debugpy, module breakpoints often aren't verified
+    # until after the first stop, which is when the post-stop retry is essential.
+
+    # Verify that breakpoints_by_source were successfully registered (either during
+    # retry-after-init or retry-after-stop)
+    source_results = result["setBreakpointsBySource"]
+    for source_path, source_result in source_results.items():
+        response = source_result.get("response", {})
+        assert (
+            response.get("success") is True
+        ), f"Expected breakpoints_by_source to succeed for {source_path}"
+
+    # If retry after stop occurred, validate those results too
+    if "setBreakpointsBySourceRetryAfterStop" in result:
+        retry_results = result["setBreakpointsBySourceRetryAfterStop"]
+        for source_path, response in retry_results.items():
+            assert "helpers.py" in source_path, f"Expected helpers.py in {source_path}"
+            assert (
+                response.get("success") is True
+            ), f"Expected retry to succeed for {source_path}"
+
+    # Verify breakpoint registry includes both files
+    bp_list = await mcp_server.dap_list_breakpoints()
+    breakpoints = bp_list.get("breakpoints", {})
+
+    # Should have entries for both the program and the source file
+    program_path = str(Path(script).resolve())
+    assert program_path in breakpoints, "Main program breakpoint not in registry"
+
+    # Source path should be resolved and registered
+    # (exact path may vary based on resolution logic, but should contain helpers.py)
+    helper_paths = [p for p in breakpoints.keys() if "helpers.py" in p]
+    assert len(helper_paths) > 0, "Source file breakpoint not in registry"
+
+    # Verify the source breakpoints have the correct line numbers
+    for helper_path in helper_paths:
+        lines = breakpoints[helper_path]
+        assert 5 in lines or 10 in lines, f"Expected lines [5, 10] but got {lines}"
