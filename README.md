@@ -28,6 +28,14 @@ Install (from source):
 python -m pip install -e '.[dev]'
 ```
 
+**IMPORTANT:** Install git hooks to run CI checks before every commit:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This prevents CI failures by automatically running ruff, black, mypy, and pytest before allowing commits.
+
 Run the CLI after activating the project virtualenv:
 
 ```bash
