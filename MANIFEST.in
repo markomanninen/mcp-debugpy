@@ -1,0 +1,27 @@
+# Include all Python files in src/
+include src/*.py
+recursive-include src *.py
+
+# Include documentation
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+include STATUS.md
+include FINAL_REPORT.md
+
+# Include documentation directory
+recursive-include docs *.md
+
+# Include examples
+recursive-include examples *.py
+recursive-include examples *.md
+
+# Include scripts
+recursive-include scripts *.py
+recursive-include scripts *.sh
+
+# Exclude unnecessary files
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store
+global-exclude *.backup

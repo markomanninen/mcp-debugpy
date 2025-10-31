@@ -35,6 +35,7 @@ Repository = "https://github.com/markomanninen/mcp-debugpy"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+py-modules = ["cli", "mcp_server", "dap_stdio_client", "dap_stdio_direct", "debug_utils"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
