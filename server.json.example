@@ -1,0 +1,30 @@
+{
+  "name": "io.github.markomanninen/mcp-debugpy",
+  "title": "Agent Debug Tools - Python Debugging with debugpy",
+  "description": "MCP server for AI-assisted Python debugging using debugpy and Debug Adapter Protocol. Features breakpoint validation, enhanced error messages, and comprehensive testing tools.",
+  "version": "0.2.1",
+  "packages": {
+    "pypi": {
+      "name": "mcp-debugpy",
+      "version": ">=0.2.1"
+    }
+  },
+  "runtime": {
+    "python": {
+      "command": "mcp-debug-server",
+      "args": []
+    }
+  },
+  "capabilities": [
+    "debugging",
+    "testing",
+    "breakpoint-validation"
+  ],
+  "metadata": {
+    "author": "markomanninen",
+    "homepage": "https://github.com/markomanninen/mcp-debugpy",
+    "repository": "https://github.com/markomanninen/mcp-debugpy",
+    "license": "MIT",
+    "tags": ["debugging", "python", "debugpy", "dap", "testing", "pytest"]
+  }
+}
