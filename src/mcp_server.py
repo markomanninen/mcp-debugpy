@@ -19,9 +19,12 @@ The server provides tools for:
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import aiofiles
 from textwrap import dedent
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,9 +37,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_agent_instructions() -> str:
+    global _agent_instructions_cache
+    if _agent_instructions_cache is not None:
+        return _agent_instructions_cache
+
     instructions_path = PROJECT_ROOT / "agent_instructions.md"
     try:
-        return instructions_path.read_text(encoding="utf-8")
+        _agent_instructions_cache = instructions_path.read_text(encoding="utf-8")
+        return _agent_instructions_cache
     except OSError:
         return (
             "Agent Debug Tools: use repo-relative paths (e.g. 'src/sample_app/app.py') "
@@ -44,10 +52,12 @@ def _load_agent_instructions() -> str:
         )
 
 
+_agent_instructions_cache: Optional[str] = None
 mcp = FastMCP("agent-debug-tools", instructions=_load_agent_instructions())
 
 _breakpoint_registry: Dict[str, List[int]] = {}
 _last_stopped_event: Optional[Dict[str, Any]] = None
+_python_executable_path: Optional[Path] = None
 
 
 @mcp.tool()
@@ -115,11 +125,20 @@ def ensure_demo_program(directory: Optional[str] = None) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
+async def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
     """Read a UTF-8 text file so agents can inspect generated code before debugging."""
     file_path = Path(path).expanduser()
     if not file_path.is_absolute():
         file_path = (Path.cwd() / file_path).resolve()
+
+    # Security: Ensure the path is within the project directory
+    if not file_path.is_relative_to(Path.cwd()):
+        return {
+            "error": "Path traversal detected",
+            "requested": path,
+            "resolved": str(file_path),
+        }
+
     if not file_path.exists():
         return {
             "error": "File does not exist",
@@ -127,7 +146,8 @@ def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
             "resolved": str(file_path),
         }
     try:
-        data = file_path.read_text(encoding="utf-8")
+        async with aiofiles.open(file_path, mode='r', encoding='utf-8') as f:
+            data = await f.read()
     except UnicodeDecodeError:
         return {
             "error": "File is not UTF-8 text",
@@ -146,11 +166,16 @@ def read_text_file(path: str, max_bytes: int = 65536) -> Dict[str, Any]:
 
 def _get_python_executable() -> Path:
     """Get the correct Python executable, preferring virtual environment if available."""
+    global _python_executable_path
+    if _python_executable_path and _python_executable_path.exists():
+        return _python_executable_path
+
     # First check if we're already in a virtual environment via VIRTUAL_ENV
     if "VIRTUAL_ENV" in os.environ:
         venv_python = Path(os.environ["VIRTUAL_ENV"]) / "bin" / "python"
         if venv_python.exists():
             log_debug(f"_get_python_executable: using VIRTUAL_ENV {venv_python}")
+            _python_executable_path = venv_python
             return venv_python
 
     # Check if we're in a virtual environment relative to current working directory
@@ -158,6 +183,7 @@ def _get_python_executable() -> Path:
     venv_path = cwd / ".venv" / "bin" / "python"
     if venv_path.exists():
         log_debug(f"_get_python_executable: using cwd .venv {venv_path}")
+        _python_executable_path = venv_path
         return venv_path
 
     # Check for other common venv locations
@@ -165,6 +191,7 @@ def _get_python_executable() -> Path:
         venv_python = cwd / venv_name / "bin" / "python"
         if venv_python.exists():
             log_debug(f"_get_python_executable: using cwd venv {venv_python}")
+            _python_executable_path = venv_python
             return venv_python
 
     # Check parent directories for virtual environments
@@ -173,11 +200,13 @@ def _get_python_executable() -> Path:
             venv_python = parent / venv_name / "bin" / "python"
             if venv_python.exists():
                 log_debug(f"_get_python_executable: using ancestor venv {venv_python}")
+                _python_executable_path = venv_python
                 return venv_python
 
     # Fall back to sys.executable
     fallback = Path(sys.executable)
     log_debug(f"_get_python_executable: falling back to sys.executable {fallback}")
+    _python_executable_path = fallback
     return fallback
 
 
@@ -193,6 +222,11 @@ def run_tests_json(pytest_args: Optional[List[str]] = None) -> Dict[str, Any]:
     Args:
         pytest_args: extra pytest args (e.g., ["-k", "unit"])
     """
+    if pytest_args:
+        for arg in pytest_args:
+            if re.search(r'[;&|`"\'$()]', arg):
+                return {"error": "Invalid characters in pytest_args"}
+
     report = Path(".pytest-report.json")
     python_exec = _get_python_executable()
     if not python_exec.exists():

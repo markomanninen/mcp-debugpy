@@ -1,3 +1,4 @@
 mcp==1.7.1
 debugpy>=1.8.0
 Flask>=2.3
+aiofiles>=23.2.1

@@ -21,7 +21,7 @@ async def test_mcp_end_to_end() -> None:
     demo = mcp_server.ensure_demo_program()
     assert Path(demo["path"]).exists()
     assert demo.get("launchInput", {}).get("breakpoints") == [14, 20]
-    demo_text = mcp_server.read_text_file(demo["path"])
+    demo_text = await mcp_server.read_text_file(demo["path"])
     assert "calculate_average" in demo_text.get("content", "")
 
     # Pytest helpers should round-trip JSON summaries.
