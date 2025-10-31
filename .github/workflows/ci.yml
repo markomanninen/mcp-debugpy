@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           # Install runtime and test dependencies (skip dev extras that require ruff)
           python -m pip install -e .
-          python -m pip install pytest pytest-asyncio pytest-json-report
+          python -m pip install pytest pytest-asyncio pytest-json-report httpx
           # Install linters required by the workflow
           python -m pip install black mypy types-aiofiles
           # Optional: try to pre-install ruff (prefer binary) but don't fail if unavailable
