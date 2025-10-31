@@ -13,15 +13,30 @@ Enable AI agents to debug your Python code through natural language. This MCP se
 
 ## Quick start
 
+**macOS/Linux:**
+
 ```bash
 git clone <this-folder>
 cd mvp-agent-debug
 ./setup.sh
 
-# In a new terminal, activate the venv and run demos/tests as needed:
+# Activate the venv and run demos/tests:
 source .venv/bin/activate
-python src/dap_stdio_direct.py        # direct adapter walkthrough (waits for breakpoint)
-python -m pytest tests/test_mcp_server.py  # verify MCP tooling via fakes
+python src/dap_stdio_direct.py        # direct adapter walkthrough
+python -m pytest tests/test_mcp_server.py  # verify MCP tooling
+```
+
+**Windows:**
+
+```cmd
+git clone <this-folder>
+cd mvp-agent-debug
+setup.bat
+
+REM Activate the venv and run demos/tests:
+.venv\Scripts\activate
+python src\dap_stdio_direct.py
+python -m pytest tests\test_mcp_server.py
 ```
 
 Install (from source):
