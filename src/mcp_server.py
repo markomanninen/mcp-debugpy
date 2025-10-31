@@ -458,7 +458,6 @@ async def dap_launch(
     breakpoints: Optional[List[int]] = None,
     breakpoints_by_source: Optional[Dict[str, List[int]]] = None,
     stop_on_entry: bool = False,
-    console: str = "internalConsole",
     wait_for_breakpoint: bool = True,
     breakpoint_timeout: float = 5.0,
 ) -> Dict[str, Any]:
@@ -474,9 +473,32 @@ async def dap_launch(
     - breakpoints_by_source: Dict mapping source paths to line numbers for breakpoints
       in additional files (e.g., {"examples/gui_counter/counter.py": [16]})
     - stop_on_entry: If True, adds a breakpoint at line 1 of the program
-    - console: Console type ("internalConsole", "integratedTerminal", or "externalTerminal")
     - wait_for_breakpoint: If True, waits for a stopped event before returning
     - breakpoint_timeout: Maximum seconds to wait for stopped event
+
+    **Common Pitfalls to Avoid:**
+    1. **Don't set breakpoints on function definitions**: Set them on the first executable
+       line INSIDE the function (e.g., line 41, not line 39 for a function starting at line 39).
+       Python stops at function definitions during class loading, not during execution.
+
+    2. **Use stop_on_entry for full control**: Set `stop_on_entry=True` to pause execution
+       before any code runs, giving you time to inspect state before hitting your breakpoints.
+
+    3. **Prefer function call locations**: Instead of breaking at the function definition,
+       set breakpoints where the function is CALLED (e.g., in main()), then use `dap_step_in()`.
+
+    **Recommended Debugging Pattern:**
+    ```python
+    # Good: Break where function is called, then step in
+    dap_launch(program="script.py", breakpoints=[71])  # Line 71 calls the function
+    dap_step_in()  # Step into the function
+
+    # Also good: Break on first executable line inside function
+    dap_launch(program="script.py", breakpoints=[41])  # First line inside calculate_total
+
+    # Avoid: Breaking on function definition
+    dap_launch(program="script.py", breakpoints=[39])  # Function definition - stops during class loading
+    ```
 
     **Breakpoint Registration Flow:**
     1. Initial attempt: setBreakpoints called before configurationDone (may fail if adapter not ready)
@@ -733,7 +755,6 @@ async def dap_launch(
         client.launch(
             program=str(program_path),
             cwd=str(launch_cwd),
-            console=console,
             env=launch_env,
         )
     )
@@ -870,6 +891,80 @@ async def dap_launch(
             result["setBreakpointsBySourceRetryAfterStop"] = retry_results
 
     return result
+
+
+@mcp.tool()
+async def dap_validate_breakpoint_line(source_path: str, line: int) -> Dict[str, Any]:
+    """Validate if a line number is a good breakpoint location.
+
+    Analyzes the source code to warn about common mistakes like:
+    - Setting breakpoints on function/class definitions
+    - Setting breakpoints on comments or blank lines
+    - Setting breakpoints on import statements
+
+    Returns suggestions for better breakpoint locations nearby.
+    """
+    path = Path(source_path).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+
+    if not path.exists():
+        return {"error": "File not found", "path": str(path)}
+
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if line < 1 or line > len(lines):
+            return {
+                "error": "Line number out of range",
+                "line": line,
+                "total_lines": len(lines),
+            }
+
+        target_line = lines[line - 1].strip()
+        warnings = []
+        suggestions = []
+
+        # Check for function/class definitions
+        if target_line.startswith("def ") or target_line.startswith("async def "):
+            warnings.append("This is a function definition line")
+            if line < len(lines):
+                suggestions.append(
+                    f"Consider line {line + 1} (first line inside the function)"
+                )
+            suggestions.append(
+                "Or set breakpoint where function is called, then use dap_step_in()"
+            )
+
+        if target_line.startswith("class "):
+            warnings.append("This is a class definition line")
+            suggestions.append("Set breakpoint in __init__ or a method instead")
+
+        # Check for comments/blank lines
+        if not target_line or target_line.startswith("#"):
+            warnings.append("This is a comment or blank line")
+            # Find next non-blank line
+            for i in range(line, min(line + 5, len(lines))):
+                next_line = lines[i].strip()
+                if next_line and not next_line.startswith("#"):
+                    preview = next_line[:50] + "..." if len(next_line) > 50 else next_line
+                    suggestions.append(f"Consider line {i + 1}: {preview}")
+                    break
+
+        # Check for import statements
+        if target_line.startswith("import ") or target_line.startswith("from "):
+            warnings.append("This is an import statement")
+            suggestions.append("Breakpoints on imports may not be useful")
+            suggestions.append("Set breakpoint in a function or after imports")
+
+        return {
+            "line": line,
+            "content": target_line,
+            "isValid": len(warnings) == 0,
+            "warnings": warnings,
+            "suggestions": suggestions,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @mcp.tool()
@@ -1076,7 +1171,7 @@ Testing Tools:
 Debug Adapter Protocol (DAP) Tools:
 -----------------------------------
 • dap_launch(program: str, cwd: Optional[str], breakpoints: Optional[List[int]],
-             console: str, wait_for_breakpoint: bool, breakpoint_timeout: float)
+             wait_for_breakpoint: bool, breakpoint_timeout: float)
     Launch a program under debugpy.adapter with optional breakpoints
 • dap_set_breakpoints(source_path: str, lines: List[int])
     Set breakpoints by absolute source path and line numbers

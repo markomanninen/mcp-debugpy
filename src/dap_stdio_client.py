@@ -244,9 +244,25 @@ class StdioDAPClient:
             if not line:
                 log_debug("dap_stdio_client._recv: adapter closed connection")
                 detail = self._format_stderr_tail()
-                message = "Adapter stdout closed"
+
+                # Check if process exited
+                exit_code = None
+                if self.proc and self.proc.returncode is not None:
+                    exit_code = self.proc.returncode
+
+                message = "Debug adapter connection closed"
+                if exit_code is not None:
+                    if exit_code == 0:
+                        message += f" (program exited successfully with code {exit_code})"
+                    else:
+                        message += f" (program crashed with exit code {exit_code})"
+
                 if detail:
-                    message = f"{message}. Adapter stderr tail:\n{detail}"
+                    message = f"{message}.\nAdapter stderr:\n{detail}"
+
+                message += (
+                    "\n\nTip: Use stop_on_entry=True or verify breakpoints are on executable lines"
+                )
                 raise EOFError(message)
             if line == b"\r\n":
                 break
@@ -295,11 +311,35 @@ class StdioDAPClient:
     async def request(self, command: str, arguments: Optional[Dict[str, Any]] = None):
         """Send a DAP request and wait for the response."""
         if self._closed_exception is not None:
+            exc_type = type(self._closed_exception).__name__
             raise RuntimeError(
-                f"debug adapter connection closed: {self._closed_exception}"
+                f"Debug adapter connection closed unexpectedly.\n"
+                f"Reason: {exc_type}: {self._closed_exception}\n\n"
+                f"Common causes:\n"
+                f"  - Program finished executing before breakpoint was hit\n"
+                f"  - Program crashed with an unhandled exception\n"
+                f"  - Breakpoint set on non-executable line (e.g., function definition)\n\n"
+                f"Suggestions:\n"
+                f"  - Use stop_on_entry=True in dap_launch() for full control\n"
+                f"  - Set breakpoints on executable lines inside functions, not on 'def' lines\n"
+                f"  - Set breakpoints where functions are called, then use dap_step_in()"
             )
         if self.proc and self.proc.returncode is not None:
-            raise RuntimeError(f"debug adapter exited with code {self.proc.returncode}")
+            if self.proc.returncode == 0:
+                raise RuntimeError(
+                    f"Debug adapter process exited successfully (code {self.proc.returncode}).\n"
+                    f"The program finished executing before the debugger could complete the operation.\n\n"
+                    f"Suggestions:\n"
+                    f"  - Use stop_on_entry=True to pause execution immediately\n"
+                    f"  - Verify breakpoints are on executable lines\n"
+                    f"  - Check if program logic reaches the breakpoint location"
+                )
+            else:
+                raise RuntimeError(
+                    f"Debug adapter process crashed (exit code {self.proc.returncode}).\n"
+                    f"The program terminated with an error.\n\n"
+                    f"Check the program output and stderr for error messages."
+                )
         if not self._writer:
             raise RuntimeError("debug adapter connection not available")
         rid = next(self._seq)
