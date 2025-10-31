@@ -11,18 +11,13 @@ from pathlib import Path
 
 # Importing the module will register the MCP tools; use the server's
 # own entry behavior when run as a script.
-try:
-    # Adjust sys.path to ensure `src` is importable when installed in editable mode
-    project_root = Path(__file__).resolve().parents[1]
-    if str(project_root / "src") not in sys.path:
-        sys.path.insert(0, str(project_root / "src"))
-    import mcp_server as server
-except Exception:
-    # Fall back to relative import if the above failed (development installs)
-    try:
-        from . import mcp_server as server
-    except Exception:
-        import mcp_server as server
+
+# Adjust sys.path to ensure `src` is importable when installed in editable mode
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root / "src") not in sys.path:
+    sys.path.insert(0, str(project_root / "src"))
+
+import mcp_server as server  # noqa: E402
 
 
 def main(argv=None):
