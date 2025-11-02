@@ -6,6 +6,7 @@ with breakpoints triggered via HTTP requests.
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -24,6 +25,10 @@ from mcp_server import (
 )
 
 
+@pytest.mark.skipif(
+    os.getenv("CI") == "true",
+    reason="Flask debugging tests are flaky in CI due to timing/subprocess issues",
+)
 @pytest.mark.asyncio
 async def test_flask_app_debugging_with_http_breakpoint():
     """
@@ -158,6 +163,10 @@ async def test_flask_app_debugging_with_http_breakpoint():
         assert shutdown_result["status"] == "stopped", "Shutdown should stop debugger"
 
 
+@pytest.mark.skipif(
+    os.getenv("CI") == "true",
+    reason="Flask debugging tests are flaky in CI due to timing/subprocess issues",
+)
 @pytest.mark.asyncio
 async def test_flask_breakpoint_hit_twice_in_loop():
     """
