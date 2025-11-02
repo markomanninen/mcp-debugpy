@@ -34,6 +34,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER_ARGS = [str(REPO_ROOT / "src" / "mcp_server.py")]
 
 
+def get_mcp_server_executable() -> Optional[Path]:
+    """Get the path to the mcp-debug-server executable in the virtualenv."""
+    system = platform.system()
+    if system == "Windows":
+        return REPO_ROOT / ".venv" / "Scripts" / "mcp-debug-server.exe"
+    else:
+        return REPO_ROOT / ".venv" / "bin" / "mcp-debug-server"
+
+
 # ---------------------------------------------------------------------------
 # Utilities
 
@@ -80,7 +89,7 @@ def save_json(path: Path, data: Dict[str, object]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# VS Code
+# VS Code (settings.json)
 
 
 def vscode_candidate_paths() -> list[Path]:
@@ -163,6 +172,68 @@ def vscode_remove(data: Dict[str, object]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# VS Code Workspace (.vscode/mcp.json)
+
+
+def vscode_workspace_config_path() -> Path:
+    """Get the path to .vscode/mcp.json in the project root."""
+    return REPO_ROOT / ".vscode" / "mcp.json"
+
+
+def vscode_workspace_get_entry(data: Dict[str, object]) -> Optional[Dict[str, object]]:
+    servers = data.get("servers")
+    if isinstance(servers, dict):
+        entry = servers.get("agentDebug")
+        if isinstance(entry, dict):
+            return entry
+    return None
+
+
+def vscode_workspace_update(data: Dict[str, object]) -> None:
+    """Update .vscode/mcp.json with the mcp-debug-server executable path."""
+    servers = data.setdefault("servers", {})
+    if not isinstance(servers, dict):
+        raise RuntimeError("Expected 'servers' to be an object in .vscode/mcp.json")
+
+    mcp_server = get_mcp_server_executable()
+    if not mcp_server or not mcp_server.exists():
+        raise RuntimeError(
+            f"mcp-debug-server executable not found. Expected at: {mcp_server}\n"
+            "Make sure you've installed mcp-debugpy in the virtualenv."
+        )
+
+    # Use Path to construct the workspace-relative path - it will use OS-appropriate separators
+    # Path relative to workspace folder
+    system = platform.system()
+    if system == "Windows":
+        rel_path = Path(".venv") / "Scripts" / "mcp-debug-server.exe"
+    else:
+        rel_path = Path(".venv") / "bin" / "mcp-debug-server"
+
+    # Convert to string with forward slashes for VS Code (VS Code uses forward slashes on all platforms)
+    command = "${workspaceFolder}/" + rel_path.as_posix()
+
+    servers["agentDebug"] = {
+        "type": "stdio",
+        "command": command,
+        "args": [],
+        "cwd": "${workspaceFolder}",
+    }
+
+    # Ensure inputs array exists
+    if "inputs" not in data:
+        data["inputs"] = []
+
+
+def vscode_workspace_remove(data: Dict[str, object]) -> None:
+    servers = data.get("servers")
+    if isinstance(servers, dict) and "agentDebug" in servers:
+        del servers["agentDebug"]
+        if not servers:
+            del data["servers"]
+
+
+# ---------------------------------------------------------------------------
 # Claude Desktop
 
 
@@ -230,6 +301,53 @@ def claude_update(data: Dict[str, object], python_path: Path) -> None:
 
 
 def claude_remove(data: Dict[str, object]) -> None:
+    servers = data.get("mcpServers")
+    if isinstance(servers, dict) and "agentDebug" in servers:
+        del servers["agentDebug"]
+        if not servers:
+            del data["mcpServers"]
+
+
+# ---------------------------------------------------------------------------
+# Claude CLI (.mcp.json in project root)
+
+
+def claude_cli_config_path() -> Path:
+    """Get the path to the .mcp.json file in the project root."""
+    return REPO_ROOT / ".mcp.json"
+
+
+def claude_cli_get_entry(data: Dict[str, object]) -> Optional[Dict[str, object]]:
+    servers = data.get("mcpServers")
+    if isinstance(servers, dict):
+        entry = servers.get("agentDebug")
+        if isinstance(entry, dict):
+            return entry
+    return None
+
+
+def claude_cli_update(data: Dict[str, object]) -> None:
+    """Update .mcp.json with the mcp-debug-server executable path."""
+    servers = data.setdefault("mcpServers", {})
+    if not isinstance(servers, dict):
+        raise RuntimeError("Expected 'mcpServers' to be an object in .mcp.json")
+
+    mcp_server = get_mcp_server_executable()
+    if not mcp_server or not mcp_server.exists():
+        raise RuntimeError(
+            f"mcp-debug-server executable not found. Expected at: {mcp_server}\n"
+            "Make sure you've installed mcp-debugpy in the virtualenv."
+        )
+
+    servers["agentDebug"] = {
+        "type": "stdio",
+        "command": str(mcp_server),
+        "args": [],
+        "env": {},
+    }
+
+
+def claude_cli_remove(data: Dict[str, object]) -> None:
     servers = data.get("mcpServers")
     if isinstance(servers, dict) and "agentDebug" in servers:
         del servers["agentDebug"]
@@ -340,6 +458,45 @@ def process_vscode(args, python_path: Path) -> None:
     print(f"[VS Code] Updated agentDebug entry in {settings_path}")
 
 
+def process_vscode_workspace(args) -> None:
+    """Process VS Code workspace (.vscode/mcp.json) configuration."""
+    if args.vscode_workspace_action == "skip":
+        return
+
+    config_path = vscode_workspace_config_path()
+    config = load_json(config_path)
+    existing = vscode_workspace_get_entry(config)
+    action = prompt_action(args.vscode_workspace_action, existing, "VS Code Workspace")
+
+    if action == "skip":
+        print("[VS Code Workspace] Skipped.")
+        return
+    if action == "print":
+        print("[VS Code Workspace] Current entry:")
+        print(json.dumps(existing or {}, indent=2))
+        return
+    if action == "remove":
+        if existing is None:
+            print("[VS Code Workspace] No entry to remove.")
+            return
+        vscode_workspace_remove(config)
+        save_json(config_path, config)
+        print(f"[VS Code Workspace] Removed agentDebug entry from {config_path}")
+        return
+
+    # update
+    try:
+        vscode_workspace_update(config)
+        save_json(config_path, config)
+        print(f"[VS Code Workspace] Updated agentDebug entry in {config_path}")
+    except RuntimeError as exc:
+        print(f"[VS Code Workspace] Warning: {exc}")
+        if is_interactive():
+            choice = input("Continue anyway? [y/N] ").strip().lower()
+            if choice not in ("y", "yes"):
+                raise
+
+
 def process_claude(args, python_path: Path) -> None:
     if args.claude_action == "skip":
         return
@@ -369,6 +526,45 @@ def process_claude(args, python_path: Path) -> None:
     print(f"[Claude] Updated agentDebug entry in {config_path}")
 
 
+def process_claude_cli(args) -> None:
+    """Process Claude CLI (.mcp.json) configuration."""
+    if args.claude_cli_action == "skip":
+        return
+
+    config_path = claude_cli_config_path()
+    config = load_json(config_path)
+    existing = claude_cli_get_entry(config)
+    action = prompt_action(args.claude_cli_action, existing, "Claude CLI")
+
+    if action == "skip":
+        print("[Claude CLI] Skipped.")
+        return
+    if action == "print":
+        print("[Claude CLI] Current entry:")
+        print(json.dumps(existing or {}, indent=2))
+        return
+    if action == "remove":
+        if existing is None:
+            print("[Claude CLI] No entry to remove.")
+            return
+        claude_cli_remove(config)
+        save_json(config_path, config)
+        print(f"[Claude CLI] Removed agentDebug entry from {config_path}")
+        return
+
+    # update
+    try:
+        claude_cli_update(config)
+        save_json(config_path, config)
+        print(f"[Claude CLI] Updated agentDebug entry in {config_path}")
+    except RuntimeError as exc:
+        print(f"[Claude CLI] Warning: {exc}")
+        if is_interactive():
+            choice = input("Continue anyway? [y/N] ").strip().lower()
+            if choice not in ("y", "yes"):
+                raise
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 
@@ -382,13 +578,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--vscode-action",
         choices=["prompt", "update", "remove", "skip", "print"],
         default="prompt",
-        help="Action to perform for VS Code configuration",
+        help="Action to perform for VS Code (settings.json) configuration",
+    )
+    parser.add_argument(
+        "--vscode-workspace-action",
+        choices=["prompt", "update", "remove", "skip", "print"],
+        default="prompt",
+        help="Action to perform for VS Code Workspace (.vscode/mcp.json) configuration",
     )
     parser.add_argument(
         "--claude-action",
         choices=["prompt", "update", "remove", "skip", "print"],
         default="prompt",
         help="Action to perform for Claude Desktop configuration",
+    )
+    parser.add_argument(
+        "--claude-cli-action",
+        choices=["prompt", "update", "remove", "skip", "print"],
+        default="prompt",
+        help="Action to perform for Claude CLI (.mcp.json) configuration",
     )
     return parser
 
@@ -410,10 +618,31 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
-        process_claude(args, python_path)
+        process_vscode_workspace(args)
     except RuntimeError as exc:
         print(exc, file=sys.stderr)
         return 3
+
+    try:
+        process_claude(args, python_path)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 4
+
+    try:
+        process_claude_cli(args)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 5
+
+    print("\nConfiguration complete!")
+    print(f"  OS detected: {platform.system()}")
+    print(f"  Project root: {REPO_ROOT}")
+    mcp_server = get_mcp_server_executable()
+    if mcp_server and mcp_server.exists():
+        print(f"  MCP server: {mcp_server}")
+    else:
+        print(f"  MCP server: Not found (expected at {mcp_server})")
 
     return 0
 

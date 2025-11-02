@@ -1,12 +1,25 @@
 import asyncio
 import json
 import itertools
+import socket
 import os
+import platform
 import sys
 import tempfile
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+# Windows-specific subprocess flags to escape job object restrictions
+if platform.system() == "Windows":
+    import subprocess
+
+    CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+else:
+    CREATE_BREAKAWAY_FROM_JOB = 0
+    CREATE_NEW_PROCESS_GROUP = 0
 
 from debug_utils import log_debug
 
@@ -36,6 +49,8 @@ class StdioDAPClient:
         self._stderr_task: Optional[asyncio.Task] = None
         self._stderr_lines: deque[str] = deque(maxlen=20)
         self._stderr_summary: Optional[str] = None
+        self._connect_host: Optional[str] = None
+        self._connect_port: Optional[int] = None
 
     def _get_python_executable(self) -> Path:
         """Get the correct Python executable, preferring virtual environment if available."""
@@ -43,15 +58,25 @@ class StdioDAPClient:
         if _python_executable_path and _python_executable_path.exists():
             return _python_executable_path
 
+        # Determine platform-specific paths
+        is_windows = platform.system() == "Windows"
+
+        if is_windows:
+            bin_dir = "Scripts"
+            python_name = "python.exe"
+        else:
+            bin_dir = "bin"
+            python_name = "python"
+
         # Check if we're in a virtual environment
-        venv_path = Path.cwd() / ".venv" / "bin" / "python"
+        venv_path = Path.cwd() / ".venv" / bin_dir / python_name
         if venv_path.exists():
             _python_executable_path = venv_path
             return venv_path
 
         # Check for other common venv locations
         for venv_name in [".venv", "venv", "env"]:
-            venv_python = Path.cwd() / venv_name / "bin" / "python"
+            venv_python = Path.cwd() / venv_name / bin_dir / python_name
             if venv_python.exists():
                 _python_executable_path = venv_python
                 return venv_python
@@ -75,30 +100,55 @@ class StdioDAPClient:
                 pass
             self._stderr_task = None
 
-        env = os.environ.copy()
-        fd, path = tempfile.mkstemp(prefix="debugpy-endpoints-", suffix=".json")
-        os.close(fd)
-        endpoints_file = Path(path)
+        self._connect_host = None
+        self._connect_port = None
+        endpoints_file: Optional[Path]
+
+        connect_host = "127.0.0.1"
+
+        # Use a dedicated directory with guaranteed write permissions
+        debugpy_dir = Path.home() / ".debugpy"
+        debugpy_dir.mkdir(exist_ok=True)
+
+        # Create endpoint file in our controlled directory
+        import uuid
+
+        endpoint_filename = f"debugpy-endpoints-{uuid.uuid4().hex[:8]}.json"
+        endpoints_file = debugpy_dir / endpoint_filename
+
+        # Remove old endpoint file if it exists
         try:
             endpoints_file.unlink()
         except FileNotFoundError:
             pass
-        env["DEBUGPY_ADAPTER_ENDPOINTS"] = str(endpoints_file)
-
-        log_debug(
-            f"dap_stdio_client.start: launching adapter cmd={self.adapter_cmd} env_file={endpoints_file}"
-        )
+        log_debug(f"dap_stdio_client.start: using endpoint file {endpoints_file}")
 
         try:
+            # Use wrapper script to pass env var via command-line arg
+            # This works around Windows asyncio env inheritance bug in MCP server context
+            wrapper_path = Path(__file__).parent / "adapter_wrapper.py"
+            log_debug(f"dap_stdio_client.start: Using wrapper script at {wrapper_path}")
+            log_debug(
+                f"dap_stdio_client.start: Passing endpoint file path as command-line arg: {endpoints_file}"
+            )
+
             self.proc = await asyncio.create_subprocess_exec(
-                *self.adapter_cmd,
+                self.adapter_cmd[0],  # python.exe
+                str(wrapper_path),
+                str(
+                    endpoints_file
+                ),  # Pass endpoint file path as arg instead of env var
                 "--host",
-                "127.0.0.1",
+                connect_host,
                 "--port",
-                "0",
+                str(self._connect_port if self._connect_port is not None else 0),
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
+                stderr=asyncio.subprocess.DEVNULL,  # DEVNULL instead of PIPE to avoid blocking
+                creationflags=(
+                    CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
+                ),
+                start_new_session=True if platform.system() != "Windows" else False,
             )
             log_debug(
                 f"dap_stdio_client.start: adapter process started with PID {self.proc.pid}"
@@ -114,38 +164,139 @@ class StdioDAPClient:
 
         # Check if process is still running
         if self.proc.returncode is not None:
-            stderr_data = await self.proc.stderr.read() if self.proc.stderr else b""
-            stdout_data = await self.proc.stdout.read() if self.proc.stdout else b""
-            log_debug(
-                f"dap_stdio_client.start: adapter exited early with code {self.proc.returncode}"
-            )
-            log_debug(f"dap_stdio_client.start: adapter stderr: {stderr_data.decode()}")
-            log_debug(f"dap_stdio_client.start: adapter stdout: {stdout_data.decode()}")
             raise RuntimeError(
                 f"debugpy.adapter exited early with code {self.proc.returncode}"
             )
 
-        await self._connect_to_adapter(endpoints_file)
-        if self.proc.stderr:
-            self._stderr_task = asyncio.create_task(self._drain_stderr())
+        await self._connect_to_adapter(
+            endpoints_file, self._connect_host, self._connect_port
+        )
         # Keep a reference to the reader task so it can be awaited/cancelled later
         self._reader_task_handle = asyncio.create_task(self._reader_task())
 
-    async def _connect_to_adapter(self, endpoints_file: Path) -> None:
-        timeout = 5.0
+    async def _connect_to_adapter(
+        self,
+        endpoints_file: Optional[Path],
+        override_host: Optional[str],
+        override_port: Optional[int],
+    ) -> None:
+        timeout = 10.0  # Increased from 5.0 to handle Windows antivirus delays
         interval = 0.05
+
+        if override_host is not None and override_port is not None:
+            elapsed = 0.0
+            log_debug(
+                f"dap_stdio_client._connect_to_adapter: probing socket {override_host}:{override_port} for adapter"
+            )
+            while elapsed < timeout:
+                if self.proc and self.proc.returncode is not None:
+                    raise RuntimeError(
+                        f"debugpy.adapter exited with code {self.proc.returncode}"
+                    )
+                try:
+                    reader, writer = await asyncio.open_connection(
+                        override_host, override_port
+                    )
+                except (ConnectionRefusedError, OSError):
+                    await asyncio.sleep(interval)
+                    elapsed += interval
+                    continue
+
+                log_debug(
+                    f"dap_stdio_client: connected to adapter via reserved port {override_host}:{override_port}"
+                )
+                self._reader = reader
+                self._writer = writer
+                return
+
+            log_debug(
+                f"dap_stdio_client: timed out connecting to reserved port {override_host}:{override_port}"
+            )
+            if endpoints_file is None:
+                raise TimeoutError(
+                    f"Timed out waiting for debugpy.adapter on {override_host}:{override_port}"
+                )
+            log_debug("dap_stdio_client: falling back to endpoints file probing")
+
+        if endpoints_file is None:
+            raise RuntimeError(
+                "No adapter endpoints file available for fallback connection strategy"
+            )
+
+        # WORKAROUND: On Windows MCP context, env vars don't pass through asyncio.create_subprocess_exec
+        # So adapter creates its own random filename instead of using the one we specified
+        # Solution: Look for ANY new endpoint file in the directory
+        debugpy_dir = endpoints_file.parent
+        import glob
+
+        # Get existing files before waiting
+        existing_files = set(glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json")))
+
         elapsed = 0.0
+        log_debug(
+            f"dap_stdio_client._connect_to_adapter: waiting up to {timeout}s for endpoints file (looking for new files in {debugpy_dir})"
+        )
+        actual_file = None
         while elapsed < timeout:
             if self.proc and self.proc.returncode is not None:
                 raise RuntimeError(
                     f"debugpy.adapter exited with code {self.proc.returncode}"
                 )
-            if endpoints_file.exists() and endpoints_file.stat().st_size > 0:
-                break
+            # Check for any NEW endpoint file
+            current_files = set(
+                glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json"))
+            )
+            new_files = current_files - existing_files
+            if new_files:
+                # Found a new file!
+                actual_file = Path(list(new_files)[0])
+                if actual_file.stat().st_size > 0:
+                    log_debug(
+                        f"dap_stdio_client: found new endpoint file: {actual_file.name}"
+                    )
+                    endpoints_file = actual_file  # Update to the actual file created
+                    break
             await asyncio.sleep(interval)
             elapsed += interval
         else:
             log_debug("dap_stdio_client: waiting for endpoints timed out")
+            # Capture stderr/stdout to see what went wrong
+            if self.proc and self.proc.stderr:
+                try:
+                    stderr_data = await asyncio.wait_for(
+                        self.proc.stderr.read(4096), timeout=1.0
+                    )
+                    if stderr_data:
+                        log_debug(
+                            f"dap_stdio_client: adapter stderr on timeout: {stderr_data.decode(errors='ignore')}"
+                        )
+                except asyncio.TimeoutError:
+                    log_debug("dap_stdio_client: no stderr data available")
+                except Exception as e:
+                    log_debug(f"dap_stdio_client: error reading stderr: {e}")
+            if self.proc and self.proc.stdout:
+                try:
+                    stdout_data = await asyncio.wait_for(
+                        self.proc.stdout.read(4096), timeout=1.0
+                    )
+                    if stdout_data:
+                        log_debug(
+                            f"dap_stdio_client: adapter stdout on timeout: {stdout_data.decode(errors='ignore')}"
+                        )
+                except asyncio.TimeoutError:
+                    log_debug("dap_stdio_client: no stdout data available")
+                except Exception as e:
+                    log_debug(f"dap_stdio_client: error reading stdout: {e}")
+            log_debug(
+                f"dap_stdio_client: process still running: {self.proc and self.proc.returncode is None}"
+            )
+            log_debug(
+                f"dap_stdio_client: endpoints file exists: {endpoints_file.exists()}"
+            )
+            if endpoints_file.exists():
+                log_debug(
+                    f"dap_stdio_client: endpoints file size: {endpoints_file.stat().st_size}"
+                )
             raise TimeoutError("Timed out waiting for debugpy.adapter endpoints")
 
         data = json.loads(endpoints_file.read_text())

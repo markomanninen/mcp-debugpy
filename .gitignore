@@ -54,3 +54,7 @@ Thumbs.db
 
 # Ruff cache
 .ruff_cache
+
+.claude
+
+*mcp.json
