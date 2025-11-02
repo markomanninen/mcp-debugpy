@@ -123,7 +123,9 @@ class StdioDAPClient:
         for stale_file in stale_files:
             try:
                 Path(stale_file).unlink()
-                log_debug(f"dap_stdio_client.start: removed stale endpoint file {stale_file}")
+                log_debug(
+                    f"dap_stdio_client.start: removed stale endpoint file {stale_file}"
+                )
             except (FileNotFoundError, OSError):
                 pass
 
@@ -178,7 +180,10 @@ class StdioDAPClient:
             )
 
         await self._connect_to_adapter(
-            endpoints_file, self._connect_host, self._connect_port, existing_files_baseline
+            endpoints_file,
+            self._connect_host,
+            self._connect_port,
+            existing_files_baseline,
         )
         # Keep a reference to the reader task so it can be awaited/cancelled later
         self._reader_task_handle = asyncio.create_task(self._reader_task())
@@ -242,7 +247,9 @@ class StdioDAPClient:
         if existing_files_baseline is not None:
             existing_files = existing_files_baseline
         else:
-            existing_files = set(glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json")))
+            existing_files = set(
+                glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json"))
+            )
 
         elapsed = 0.0
         log_debug(
