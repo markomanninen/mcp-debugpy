@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import json
 import itertools
 import socket
@@ -116,11 +117,19 @@ class StdioDAPClient:
         endpoint_filename = f"debugpy-endpoints-{uuid.uuid4().hex[:8]}.json"
         endpoints_file = debugpy_dir / endpoint_filename
 
-        # Remove old endpoint file if it exists
-        try:
-            endpoints_file.unlink()
-        except FileNotFoundError:
-            pass
+        # Clean up ALL stale endpoint files to prevent detection issues
+        # Take a snapshot of existing files BEFORE cleanup (should be empty after cleanup)
+        stale_files = glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json"))
+        for stale_file in stale_files:
+            try:
+                Path(stale_file).unlink()
+                log_debug(f"dap_stdio_client.start: removed stale endpoint file {stale_file}")
+            except (FileNotFoundError, OSError):
+                pass
+
+        # After cleanup, the baseline for detecting new files should be empty
+        existing_files_baseline = set()
+
         log_debug(f"dap_stdio_client.start: using endpoint file {endpoints_file}")
 
         try:
@@ -169,7 +178,7 @@ class StdioDAPClient:
             )
 
         await self._connect_to_adapter(
-            endpoints_file, self._connect_host, self._connect_port
+            endpoints_file, self._connect_host, self._connect_port, existing_files_baseline
         )
         # Keep a reference to the reader task so it can be awaited/cancelled later
         self._reader_task_handle = asyncio.create_task(self._reader_task())
@@ -179,6 +188,7 @@ class StdioDAPClient:
         endpoints_file: Optional[Path],
         override_host: Optional[str],
         override_port: Optional[int],
+        existing_files_baseline: Optional[set] = None,
     ) -> None:
         timeout = 10.0  # Increased from 5.0 to handle Windows antivirus delays
         interval = 0.05
@@ -227,10 +237,12 @@ class StdioDAPClient:
         # So adapter creates its own random filename instead of using the one we specified
         # Solution: Look for ANY new endpoint file in the directory
         debugpy_dir = endpoints_file.parent
-        import glob
 
-        # Get existing files before waiting
-        existing_files = set(glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json")))
+        # Use the baseline provided by caller, or capture current state
+        if existing_files_baseline is not None:
+            existing_files = existing_files_baseline
+        else:
+            existing_files = set(glob.glob(str(debugpy_dir / "debugpy-endpoints-*.json")))
 
         elapsed = 0.0
         log_debug(

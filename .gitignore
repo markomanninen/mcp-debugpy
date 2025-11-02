@@ -24,6 +24,8 @@ pytest-report.json
 .pytest-report.json
 coverage.xml
 htmlcov/
+flake-logs/
+flake-logs-*/
 
 # Packaging / build artifacts
 dist/
