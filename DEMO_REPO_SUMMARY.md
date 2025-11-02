@@ -251,7 +251,7 @@ for a complete walkthrough of debugging a Python application with an intentional
 
 ## Repository Structure
 
-```
+```text
 mcp-debugpy-demo/
 ├── .git/                     # Git repository
 ├── .gitignore                # Ignore patterns
@@ -325,7 +325,7 @@ These changes should be committed to the main mcp-debugpy repository:
 
 **Suggested commit message**:
 
-```
+```text
 fix: Add standalone modules to package distribution
 
 Previously, core modules (cli.py, mcp_server.py, etc.) were not included
