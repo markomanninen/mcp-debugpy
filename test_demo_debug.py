@@ -23,7 +23,7 @@ async def main():
         "breakpoints": [14, 20],
         "stop_on_entry": True,
         "wait_for_breakpoint": True,
-        "breakpoint_timeout": 180
+        "breakpoint_timeout": 180,
     }
 
     print("=" * 60)
@@ -48,7 +48,7 @@ async def main():
             cwd=config["cwd"],
             stop_on_entry=config["stop_on_entry"],
             wait_for_breakpoint=config["wait_for_breakpoint"],
-            breakpoint_timeout=config["breakpoint_timeout"]
+            breakpoint_timeout=config["breakpoint_timeout"],
         )
 
         print("\n" + "=" * 60)
@@ -93,6 +93,7 @@ async def main():
     except Exception as e:
         print(f"\n[ERROR] Debug session failed: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
