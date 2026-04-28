@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/markomanninen-mcp-debugpy-badge.png)](https://mseep.ai/app/markomanninen-mcp-debugpy)
+
 # mcp-debugpy
 
 [![CI](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml/badge.svg)](https://github.com/markomanninen/mcp-debugpy/actions/workflows/ci.yml)
